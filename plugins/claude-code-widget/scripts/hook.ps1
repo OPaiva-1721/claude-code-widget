@@ -5,8 +5,10 @@
 #   PreToolUse (AskUserQuestion) -> queue\req-<id>.json (kind=question), waits for the answers,
 #                                   prints permissionDecision=allow + updatedInput.answers.
 #   Stop                         -> queue\done-<session>-<ms>.json ("Claude finished"), unless you are
-#                                   already looking at that project's VS Code window.
-#   UserPromptSubmit             -> removes that session's "finished" notice (you are back in it).
+#                                   already looking at that session's window.
+#   UserPromptSubmit             -> removes that session's "finished" notice (you are back in it) and
+#                                   remembers the window in front (sessions\<session>.json) when it
+#                                   belongs to this Claude Code session: VS Code or a terminal.
 #   SessionStart / -EnsureWidget -> only makes sure the widget is running.
 # Computer idle (no mouse/keyboard for $AwaySecs): requests and questions skip the widget and go
 # straight to VS Code (and to your phone/browser when Remote Control is on).
@@ -23,7 +25,11 @@ $WidgetScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'widget.ps1'))
 $Data = if ($env:CLAUDE_PLUGIN_DATA) { $env:CLAUDE_PLUGIN_DATA } else { Join-Path $env:USERPROFILE '.claude\claude-code-widget' }
 $Data = [IO.Path]::GetFullPath($Data).TrimEnd('\')
 $Queue = Join-Path $Data 'queue'
+$Sessions = Join-Path $Data 'sessions'
 $LogPath = Join-Path $Data 'hook.log'
+# Processes that own a terminal window (classic console, Windows Terminal and common alternatives)
+$TerminalHosts = @('windowsterminal.exe', 'openconsole.exe', 'conhost.exe', 'powershell.exe', 'pwsh.exe', 'cmd.exe',
+    'wezterm-gui.exe', 'alacritty.exe', 'mintty.exe', 'tabby.exe', 'hyper.exe')
 $TimeoutSecs = 300
 $AwaySecs = 120
 if ($env:CLAUDE_WIDGET_AWAY_SECS) { $AwaySecs = [int]$env:CLAUDE_WIDGET_AWAY_SECS }
@@ -119,17 +125,91 @@ public static uint Seconds() {
 
 function Test-Away { return (Get-IdleSeconds) -ge $AwaySecs }
 
-# Is this project's VS Code window in front? Then no "finished" notice is needed.
-function Test-UserWatching([string]$cwd) {
-    if (-not $cwd) { return $false }
-    try {
-        Add-Type -Namespace ClaudeWidget -Name Fg -MemberDefinition @'
+function Initialize-Win32 {
+    if ('ClaudeWidget.Win' -as [type]) { return }
+    Add-Type -Namespace ClaudeWidget -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+[DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
 '@
-        $sb = New-Object System.Text.StringBuilder 512
-        [void][ClaudeWidget.Fg]::GetWindowText([ClaudeWidget.Fg]::GetForegroundWindow(), $sb, 512)
-        $title = $sb.ToString()
+}
+
+function Get-WindowTitle([IntPtr]$h) {
+    $sb = New-Object System.Text.StringBuilder 512
+    [void][ClaudeWidget.Win]::GetWindowText($h, $sb, 512)
+    return $sb.ToString()
+}
+
+# This hook's ancestors (Claude Code, its shell, the terminal or VS Code) + a pid -> process map
+function Get-ProcessTree {
+    $map = @{}
+    foreach ($p in Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, Name) { $map[[int]$p.ProcessId] = $p }
+    $ancestors = @{}
+    $cur = [int]$PID
+    for ($i = 0; $i -lt 16 -and $map.ContainsKey($cur); $i++) {
+        $parent = [int]$map[$cur].ParentProcessId
+        if ($parent -eq 0 -or $ancestors.ContainsKey($parent)) { break }
+        $ancestors[$parent] = $true
+        $cur = $parent
+    }
+    return @{ map = $map; ancestors = $ancestors }
+}
+
+# On UserPromptSubmit the window in front is almost always where you typed. Remember it, but only
+# if it really belongs to this session: its owner (or the owner's parent, for a classic console
+# whose window belongs to conhost.exe) must be one of this hook's ancestors. A prompt sent from
+# your phone (Remote Control) leaves some unrelated window in front and is ignored.
+function Save-SessionWindow([string]$sid) {
+    if (-not $sid) { return }
+    try {
+        Initialize-Win32
+        $fg = [ClaudeWidget.Win]::GetForegroundWindow()
+        if ($fg -eq [IntPtr]::Zero) { return }
+        $ownerPid = [uint32]0
+        [void][ClaudeWidget.Win]::GetWindowThreadProcessId($fg, [ref]$ownerPid)
+        $tree = Get-ProcessTree
+        $owner = $tree.map[[int]$ownerPid]
+        $ownerParent = if ($owner) { [int]$owner.ParentProcessId } else { 0 }
+        if (-not ($tree.ancestors.ContainsKey([int]$ownerPid) -or $tree.ancestors.ContainsKey($ownerParent))) {
+            Write-HookLog "$logTag window in front is not this session's, not saved"
+            return
+        }
+        $name = if ($owner) { ([string]$owner.Name).ToLowerInvariant() } else { '' }
+        $title = Get-WindowTitle $fg
+        $kind = if ($title.IndexOf('Visual Studio Code', [StringComparison]::OrdinalIgnoreCase) -ge 0) { 'vscode' }
+                elseif ($TerminalHosts -contains $name) { 'terminal' } else { 'other' }
+        New-Item -ItemType Directory -Force -Path $Sessions | Out-Null
+        [IO.File]::WriteAllText((Join-Path $Sessions "$sid.json"), (@{ hwnd = $fg.ToInt64(); kind = $kind; process = $name } | ConvertTo-Json -Compress), $Utf8)
+        Write-HookLog "$logTag session window saved ($kind, $name)"
+        # Forget sessions untouched for a week
+        Get-ChildItem -LiteralPath $Sessions -File | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    } catch { Write-HookLog "$logTag session window: $($_.Exception.Message)" }
+}
+
+# The session's remembered window, if it still exists
+function Get-SessionWindow([string]$sid) {
+    if (-not $sid) { return $null }
+    $path = Join-Path $Sessions "$sid.json"
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    try {
+        $w = [IO.File]::ReadAllText($path, $Utf8) | ConvertFrom-Json
+        Initialize-Win32
+        if ([ClaudeWidget.Win]::IsWindow([IntPtr]::new([int64]$w.hwnd))) { return $w }
+    } catch {}
+    return $null
+}
+
+# Are you already looking at this session? Then no "finished" notice is needed.
+# With a remembered window: is it in front? Without one: is this project's VS Code window in front?
+function Test-UserWatching([string]$cwd, $sessionWindow) {
+    try {
+        Initialize-Win32
+        $fg = [ClaudeWidget.Win]::GetForegroundWindow()
+        if ($sessionWindow) { return $fg.ToInt64() -eq [int64]$sessionWindow.hwnd }
+        if (-not $cwd) { return $false }
+        $title = Get-WindowTitle $fg
         $project = Split-Path -Leaf $cwd
         return ($title.IndexOf('Visual Studio Code', [StringComparison]::OrdinalIgnoreCase) -ge 0) -and
                ($title.IndexOf($project, [StringComparison]::OrdinalIgnoreCase) -ge 0)
@@ -222,13 +302,19 @@ $in = $evt.tool_input
 
 if ($hookEvent -eq 'SessionStart') { Write-HookLog $logTag; [void](Start-Widget); exit 0 }
 
-if ($hookEvent -eq 'UserPromptSubmit') { Write-HookLog $logTag; Remove-Done $sid; exit 0 }
+if ($hookEvent -eq 'UserPromptSubmit') {
+    Write-HookLog $logTag
+    Remove-Done $sid
+    Save-SessionWindow $sid
+    exit 0
+}
 
 if ($hookEvent -eq 'Stop') {
     if (-not $sid) { exit 0 }
     Remove-Done $sid
     $cwd = [string]$evt.cwd
-    if (Test-UserWatching $cwd) { Write-HookLog "$logTag no notice (project's VS Code window in front)"; exit 0 }
+    $sessionWindow = Get-SessionWindow $sid
+    if (Test-UserWatching $cwd $sessionWindow) { Write-HookLog "$logTag no notice (session window in front)"; exit 0 }
     $msg = Format-Snippet (Get-LastAssistantText $evt)
     if (-not $msg) { $msg = $S.readyNext }
     New-Item -ItemType Directory -Force -Path $Queue | Out-Null
@@ -238,6 +324,9 @@ if ($hookEvent -eq 'Stop') {
         created = $now
         cwd     = $cwd
         message = $msg
+        # Lets the widget's button go back to that exact window (VS Code or terminal)
+        hwnd    = $(if ($sessionWindow) { [int64]$sessionWindow.hwnd } else { 0 })
+        kind    = $(if ($sessionWindow) { [string]$sessionWindow.kind } else { '' })
     })
     Write-HookLog "$logTag notice created"
     [void](Start-Widget)

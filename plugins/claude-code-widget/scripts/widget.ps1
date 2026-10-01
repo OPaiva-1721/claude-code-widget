@@ -86,6 +86,7 @@ namespace ClaudeWidget {
         [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
         [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
         [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
         [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int index, int value);
         const int GWL_EXSTYLE = -20;
@@ -97,6 +98,13 @@ namespace ClaudeWidget {
         }
         public static IntPtr Foreground() { return GetForegroundWindow(); }
         public static bool Activate(IntPtr h) { return SetForegroundWindow(h); }
+        // A session's remembered window (VS Code or terminal), if it still exists
+        public static bool FocusHandle(long handle) {
+            var h = new IntPtr(handle);
+            if (handle == 0 || !IsWindow(h)) return false;
+            if (IsIconic(h)) ShowWindow(h, 9);
+            return SetForegroundWindow(h);
+        }
         public static bool Focus(string app, string project) {
             IntPtr found = IntPtr.Zero;
             EnumWindows((h, l) => {
@@ -775,6 +783,11 @@ namespace ClaudeWidget {
             $script:shownAt = Get-NowMs
             Set-ProjectChip $ui.DoneProjectChip $ui.DoneProject ([string]$d.cwd)
             $ui.DoneMsg.Text = [string]$d.message
+            $ui.BtnGoVs.Content = switch ([string]$d.kind) {
+                'terminal' { $S.goToTerminal }
+                'other' { $S.goToWindow }
+                default { $S.goToVsCode }
+            }
             Set-Panel 'DonePanel'
             Invoke-Attention $d.key {
                 if ($script:doneSound) { $script:doneSound.Play() } else { [System.Media.SystemSounds]::Beep.Play() }
@@ -812,16 +825,20 @@ namespace ClaudeWidget {
         Update-View
     }
 
-    function Close-DoneNotice([switch]$GoToVsCode) {
+    function Close-DoneNotice([switch]$GoToSession) {
         $d = $script:currentDone
         if (-not $d -or (Test-ClickTooSoon)) { return }
         Remove-Item -LiteralPath $d.file -Force -ErrorAction SilentlyContinue
         $script:currentDone = $null
-        if ($GoToVsCode -and $script:canFocus) {
-            $project = if ($d.cwd) { Split-Path -Leaf ([string]$d.cwd) } else { '' }
-            # The project's window; if not found, any VS Code window
-            if (-not [ClaudeWidget.WinFocus]::Focus('Visual Studio Code', $project)) {
-                [void][ClaudeWidget.WinFocus]::Focus('Visual Studio Code', '')
+        if ($GoToSession -and $script:canFocus) {
+            # The exact window remembered for that session (VS Code or terminal)...
+            $focused = $d.hwnd -and [ClaudeWidget.WinFocus]::FocusHandle([int64]$d.hwnd)
+            # ...otherwise, for VS Code sessions, the project's VS Code window, or any VS Code window
+            if (-not $focused -and [string]$d.kind -in @('', 'vscode')) {
+                $project = if ($d.cwd) { Split-Path -Leaf ([string]$d.cwd) } else { '' }
+                if (-not [ClaudeWidget.WinFocus]::Focus('Visual Studio Code', $project)) {
+                    [void][ClaudeWidget.WinFocus]::Focus('Visual Studio Code', '')
+                }
             }
         }
         Update-View
@@ -833,7 +850,7 @@ namespace ClaudeWidget {
     $ui.BtnAnswer.Add_Click({ Submit-Answers })
     $ui.BtnQVs.Add_Click({ Send-Response 'vscode' })
     $ui.BtnDismiss.Add_Click({ Close-DoneNotice })
-    $ui.BtnGoVs.Add_Click({ Close-DoneNotice -GoToVsCode })
+    $ui.BtnGoVs.Add_Click({ Close-DoneNotice -GoToSession })
 
     # Right-click > Close: hands pending requests back to VS Code and exits
     $menu = New-Object System.Windows.Controls.ContextMenu

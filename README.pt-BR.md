@@ -6,7 +6,7 @@ Um widget para o [Claude Code](https://code.claude.com) no Windows que fica semp
 
 - **Pedidos de permissão**: mostra a ferramenta, o comando ou arquivo e o projeto, com os botões **Aprovar**, **Negar** e **Decidir no VS Code**.
 - **Perguntas do Claude** (as de múltipla escolha): você marca uma ou várias opções, ou escreve a sua resposta.
-- **Aviso de "terminou"**: quando o Claude termina uma resposta, o widget mostra o projeto e o começo da resposta, com um botão **Ir para o VS Code**.
+- **Aviso de "terminou"**: quando o Claude termina uma resposta, o widget mostra o projeto e o começo da resposta, com um botão que leva de volta para a janela daquela sessão: VS Code ou terminal.
 
 Quando não há nada para mostrar, ele vira uma pílula pequena, que dá para arrastar para qualquer canto:
 
@@ -27,8 +27,8 @@ Quando não há nada para mostrar, ele vira uma pílula pequena, que dá para ar
 ## Requisitos
 
 - Windows 10 ou 11. O widget usa o Windows PowerShell 5.1 e o WPF, que já vêm no Windows. Não roda em macOS nem Linux.
-- Claude Code, pela extensão do VS Code ou pelo terminal. Testado na versão 2.1.286. Responder perguntas pelo widget exige a versão 2.1.85 ou mais nova.
-- O VS Code é opcional. Sem ele, só não funcionam o **Ir para o VS Code** e a verificação de "você já está olhando".
+- Claude Code, pela extensão do VS Code ou pelo terminal (Windows Terminal, PowerShell, cmd). Testado na versão 2.1.286. Responder perguntas pelo widget exige a versão 2.1.85 ou mais nova.
+- O VS Code é opcional. Tudo funciona também com o Claude Code no terminal.
 
 ## Instalação
 
@@ -49,7 +49,7 @@ Depois, abra uma sessão nova do Claude Code ou rode `/reload-plugins`. O widget
 | --- | --- |
 | Ponto laranja piscando, **pedido de permissão** | **Aprovar** executa a ação. **Negar** bloqueia e avisa o Claude que você negou. **Decidir no VS Code** mostra o pedido normal no VS Code. |
 | Ponto azul piscando, **pergunta** | Marque uma opção (ou várias, quando a pergunta permite) e clique em **Responder**. **Outra resposta** deixa você digitar; o Enter também envia. **Responder no VS Code** devolve a pergunta para o VS Code. |
-| ✓ verde, **terminou** | **Ir para o VS Code** traz para a frente a janela do VS Code daquele projeto. **Ok** fecha o aviso. |
+| ✓ verde, **terminou** | **Ir para o VS Code** ou **Ir para o terminal** traz para a frente a janela daquela sessão. **Ok** fecha o aviso. |
 
 - **Arraste** o widget para onde quiser. Ele lembra a posição.
 - **Botão direito → Fechar widget** fecha o widget. Os pedidos pendentes voltam para o VS Code. Ele abre de novo na próxima sessão ou no próximo pedido.
@@ -60,7 +60,7 @@ Depois, abra uma sessão nova do Claude Code ou rode `/reload-plugins`. O widget
 - **Nunca tira o foco.** Você continua digitando onde estava, mesmo quando clica nos botões. A única exceção é a **Outra resposta**: o widget pega o foco para você digitar e depois devolve.
 - **Limite de 5 minutos.** Se ninguém responder, o cartão fecha e o pedido vai para o VS Code normalmente.
 - **Longe do computador.** Sem uso de mouse nem teclado por 2 minutos, pedidos e perguntas não passam pelo widget e vão direto para o VS Code. Isso vale também para um cartão que já estava na tela. Se você usa o [Remote Control](https://code.claude.com/docs/en/remote-control), é assim que eles chegam no celular ou no navegador sem atraso.
-- **Sem aviso de "terminou" enquanto você está olhando.** Se a janela do VS Code daquele projeto já estiver na frente quando o Claude terminar, o aviso não aparece. Ele também some quando você manda uma mensagem nova naquela sessão, e depois de 12 horas.
+- **Sem aviso de "terminou" enquanto você está olhando.** Quando você manda uma mensagem, o widget guarda a janela onde você digitou: VS Code ou terminal. Se essa janela estiver na frente quando o Claude terminar, o aviso não aparece. No Windows Terminal isso vale por janela, não por aba. O aviso também some quando você manda uma mensagem nova naquela sessão, e depois de 12 horas.
 - **Aprovação de plano fica no VS Code.** Aprovar um plano (`ExitPlanMode`) nunca passa pelo widget.
 - **O que ele não faz:** mandar prompts novos. O Claude Code não tem um jeito suportado de enviar mensagens para uma sessão aberta no VS Code. Para isso, use o Remote Control.
 
@@ -88,9 +88,9 @@ Claude Code ──hook──▶ hook.ps1 ──queue\req-<id>.json──▶ widg
             ◀─JSON──           ◀──queue\res-<id>.json──
 ```
 
-- O `hook.ps1` roda em cinco eventos de hook. No `PermissionRequest` e no `PreToolUse` do `AskUserQuestion`, ele grava um arquivo de pedido e espera a resposta do widget. Depois devolve a decisão no formato de hook do Claude Code. No `Stop` ele grava o aviso de "terminou", e no `UserPromptSubmit` apaga esse aviso. No `SessionStart` ele só garante que o widget está aberto.
+- O `hook.ps1` roda em cinco eventos de hook. No `PermissionRequest` e no `PreToolUse` do `AskUserQuestion`, ele grava um arquivo de pedido e espera a resposta do widget. Depois devolve a decisão no formato de hook do Claude Code. No `Stop` ele grava o aviso de "terminou", e no `UserPromptSubmit` apaga esse aviso. No `UserPromptSubmit` ele também guarda a janela que está na frente, mas só se a árvore de processos mostrar que ela é daquela sessão do Claude Code. Um prompt enviado pelo celular deixa outra janela qualquer na frente, então ele é ignorado. No `SessionStart` ele só garante que o widget está aberto.
 - O `widget.ps1` é um único processo que fica rodando, um por usuário. Ele é aberto fora da árvore de processos do Claude Code, então continua aberto quando a sessão acaba. Ele verifica a pasta da fila e mostra primeiro o item mais antigo.
-- Os arquivos ficam na pasta de dados do plugin, `%USERPROFILE%\.claude\plugins\data\claude-code-widget-claude-code-widget\`: a fila, a posição do widget (`state.json`) e os logs (`hook.log`, `widget.log`).
+- Os arquivos ficam na pasta de dados do plugin, `%USERPROFILE%\.claude\plugins\data\claude-code-widget-claude-code-widget\`: a fila, a janela de cada sessão (`sessions\`), a posição do widget (`state.json`) e os logs (`hook.log`, `widget.log`).
 
 ## Segurança
 

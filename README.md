@@ -6,7 +6,7 @@ An always-on-top desktop widget for [Claude Code](https://code.claude.com) on Wi
 
 - **Permission requests**: see the tool, the command or file and the project, then click **Approve**, **Deny** or **Decide in VS Code**.
 - **Claude's questions** (the multiple-choice ones): pick one or more options, or type your own answer.
-- **"Finished" notices**: when Claude finishes a reply, the widget shows the project and the start of the reply, plus a **Go to VS Code** button.
+- **"Finished" notices**: when Claude finishes a reply, the widget shows the project and the start of the reply, plus a button that takes you back to that session's window: VS Code or the terminal.
 
 When there is nothing to show, it shrinks to a small pill that you can drag anywhere:
 
@@ -27,8 +27,8 @@ When there is nothing to show, it shrinks to a small pill that you can drag anyw
 ## Requirements
 
 - Windows 10 or 11. The widget uses Windows PowerShell 5.1 and WPF, both built into Windows. It does not run on macOS or Linux.
-- Claude Code, either the VS Code extension or the CLI. Tested with v2.1.286. Answering questions from the widget needs v2.1.85 or later.
-- VS Code is optional. Without it, everything except **Go to VS Code** and the "you are already looking" check works.
+- Claude Code, either the VS Code extension or the CLI in a terminal (Windows Terminal, PowerShell, cmd). Tested with v2.1.286. Answering questions from the widget needs v2.1.85 or later.
+- VS Code is optional. Everything works with the CLI in a terminal too.
 
 ## Install
 
@@ -49,7 +49,7 @@ Then start a new Claude Code session, or run `/reload-plugins`. The widget opens
 | --- | --- |
 | Orange pulsing dot, **permission request** | **Approve** runs the action. **Deny** blocks it and tells Claude you denied it. **Decide in VS Code** shows the normal prompt in VS Code. |
 | Blue pulsing dot, **question** | Pick an option (or several, when the question allows it), then **Answer**. **Other answer** lets you type; Enter also sends it. **Answer in VS Code** hands the question back to VS Code. |
-| Green check, **finished** | **Go to VS Code** brings that project's VS Code window to the front. **OK** dismisses the notice. |
+| Green check, **finished** | **Go to VS Code** or **Go to terminal** brings that session's window to the front. **OK** dismisses the notice. |
 
 - **Drag** the widget anywhere. It remembers the position.
 - **Right-click → Close widget** closes it. Pending requests go back to VS Code. It opens again with the next session or request.
@@ -60,7 +60,7 @@ Then start a new Claude Code session, or run `/reload-plugins`. The widget opens
 - **It never takes focus.** You keep typing wherever you were, even while you click its buttons. The only exception is **Other answer**: the widget takes focus so you can type, then gives it back.
 - **5-minute limit.** If nobody answers, the card closes and the request goes to VS Code as usual.
 - **Away from the computer.** With no mouse or keyboard input for 2 minutes, requests and questions skip the widget and go straight to VS Code. This also applies to a card already on screen. If you use [Remote Control](https://code.claude.com/docs/en/remote-control), that is how they reach your phone or browser without delay.
-- **No "finished" notice while you watch.** If that project's VS Code window is already in front when Claude finishes, no notice is shown. The notice also disappears when you send a new message in that session, and after 12 hours.
+- **No "finished" notice while you watch.** When you send a message, the widget remembers the window you typed in, VS Code or a terminal. If that window is in front when Claude finishes, no notice is shown. In Windows Terminal this works per window, not per tab. The notice also disappears when you send a new message in that session, and after 12 hours.
 - **Plan approval stays in VS Code.** Approving a plan (`ExitPlanMode`) is never routed to the widget.
 - **What it can't do:** send new prompts. Claude Code has no supported way to inject messages into a running VS Code session. For that, use Remote Control.
 
@@ -88,9 +88,9 @@ Claude Code ──hook──▶ hook.ps1 ──queue\req-<id>.json──▶ widg
             ◀─JSON──           ◀──queue\res-<id>.json──
 ```
 
-- `hook.ps1` runs on five hook events. On `PermissionRequest` and on `PreToolUse` for `AskUserQuestion`, it writes a request file and waits for the widget's answer. Then it prints the decision in Claude Code's hook format. On `Stop` it writes a "finished" notice, and on `UserPromptSubmit` it clears it. On `SessionStart` it only makes sure the widget is running.
+- `hook.ps1` runs on five hook events. On `PermissionRequest` and on `PreToolUse` for `AskUserQuestion`, it writes a request file and waits for the widget's answer. Then it prints the decision in Claude Code's hook format. On `Stop` it writes a "finished" notice, and on `UserPromptSubmit` it clears it. On `UserPromptSubmit` it also remembers the window in front, but only if the process tree shows it belongs to that Claude Code session. A prompt sent from your phone leaves an unrelated window in front, so it is ignored. On `SessionStart` it only makes sure the widget is running.
 - `widget.ps1` is a single long-running process, one per user. It is started outside Claude Code's process tree, so it survives the end of a session. It polls the queue folder and shows the oldest item first.
-- Files live in the plugin data folder, `%USERPROFILE%\.claude\plugins\data\claude-code-widget-claude-code-widget\`: the queue, the widget position (`state.json`) and logs (`hook.log`, `widget.log`).
+- Files live in the plugin data folder, `%USERPROFILE%\.claude\plugins\data\claude-code-widget-claude-code-widget\`: the queue, each session's window (`sessions\`), the widget position (`state.json`) and logs (`hook.log`, `widget.log`).
 
 ## Security
 
