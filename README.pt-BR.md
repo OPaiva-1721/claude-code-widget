@@ -43,6 +43,15 @@ Também dá para rodar os mesmos comandos dentro do Claude Code: `/plugin market
 
 Depois, abra uma sessão nova do Claude Code ou rode `/reload-plugins`. O widget abre sozinho junto com a primeira sessão.
 
+### Atualizar
+
+```powershell
+claude plugin marketplace update claude-code-widget
+claude plugin update claude-code-widget@claude-code-widget
+```
+
+Depois, abra uma sessão nova do Claude Code. O widget reinicia sozinho com a versão nova. O que mudou em cada versão está no [changelog](CHANGELOG.md), em inglês.
+
 ## Como usar
 
 | O que aparece | O que fazer |
