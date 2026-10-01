@@ -1,0 +1,14 @@
+{
+  "name": "claude-code-widget",
+  "description": "Desktop widget for Claude Code on Windows",
+  "owner": {
+    "name": "Gabryel Paiva Neves"
+  },
+  "plugins": [
+    {
+      "name": "claude-code-widget",
+      "source": "./plugins/claude-code-widget",
+      "description": "Always-on-top Windows widget: approve permissions, answer Claude's questions and get 'finished' notices without switching to VS Code."
+    }
+  ]
+}

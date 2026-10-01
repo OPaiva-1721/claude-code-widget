@@ -1,0 +1,12 @@
+{
+  "name": "claude-code-widget",
+  "displayName": "Claude Code Widget",
+  "version": "1.0.0",
+  "description": "Always-on-top Windows widget for Claude Code: approve permission requests, answer Claude's questions and get 'finished' notices without switching back to VS Code.",
+  "author": {
+    "name": "Gabryel Paiva Neves"
+  },
+  "repository": "https://github.com/OPaiva-1721/claude-code-widget",
+  "license": "MIT",
+  "keywords": ["windows", "widget", "notifications", "permissions", "hooks", "vscode"]
+}

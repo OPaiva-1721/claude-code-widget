@@ -1,0 +1,124 @@
+# Claude Code Widget
+
+[English](README.md) · **Português**
+
+Um widget para o [Claude Code](https://code.claude.com) no Windows que fica sempre por cima das outras janelas. Você continua trabalhando onde estiver. Quando o Claude precisa de você, aparece um cartão pequeno no canto da tela, sem tirar o foco da sua janela.
+
+- **Pedidos de permissão**: mostra a ferramenta, o comando ou arquivo e o projeto, com os botões **Aprovar**, **Negar** e **Decidir no VS Code**.
+- **Perguntas do Claude** (as de múltipla escolha): você marca uma ou várias opções, ou escreve a sua resposta.
+- **Aviso de "terminou"**: quando o Claude termina uma resposta, o widget mostra o projeto e o começo da resposta, com um botão **Ir para o VS Code**.
+
+Quando não há nada para mostrar, ele vira uma pílula pequena, que dá para arrastar para qualquer canto:
+
+<img src="docs/images/pt/idle.png" width="235" alt="Pílula ociosa: Claude Code · sem pedidos">
+
+<table>
+  <tr>
+    <td valign="top">
+      <img src="docs/images/pt/permission.png" width="420" alt="Cartão de pedido de permissão com os botões Aprovar, Negar e Decidir no VS Code"><br>
+      <img src="docs/images/pt/done.png" width="370" alt="Aviso de terminou com o começo da resposta do Claude e o botão Ir para o VS Code">
+    </td>
+    <td valign="top">
+      <img src="docs/images/pt/question.png" width="400" alt="Cartão de pergunta com opções de escolha única e múltipla">
+    </td>
+  </tr>
+</table>
+
+## Requisitos
+
+- Windows 10 ou 11. O widget usa o Windows PowerShell 5.1 e o WPF, que já vêm no Windows. Não roda em macOS nem Linux.
+- Claude Code, pela extensão do VS Code ou pelo terminal. Testado na versão 2.1.286. Responder perguntas pelo widget exige a versão 2.1.85 ou mais nova.
+- O VS Code é opcional. Sem ele, só não funcionam o **Ir para o VS Code** e a verificação de "você já está olhando".
+
+## Instalação
+
+Num terminal:
+
+```powershell
+claude plugin marketplace add OPaiva-1721/claude-code-widget
+claude plugin install claude-code-widget@claude-code-widget
+```
+
+Também dá para rodar os mesmos comandos dentro do Claude Code: `/plugin marketplace add OPaiva-1721/claude-code-widget` e depois `/plugin install claude-code-widget@claude-code-widget`.
+
+Depois, abra uma sessão nova do Claude Code ou rode `/reload-plugins`. O widget abre sozinho junto com a primeira sessão.
+
+## Como usar
+
+| O que aparece | O que fazer |
+| --- | --- |
+| Ponto laranja piscando, **pedido de permissão** | **Aprovar** executa a ação. **Negar** bloqueia e avisa o Claude que você negou. **Decidir no VS Code** mostra o pedido normal no VS Code. |
+| Ponto azul piscando, **pergunta** | Marque uma opção (ou várias, quando a pergunta permite) e clique em **Responder**. **Outra resposta** deixa você digitar; o Enter também envia. **Responder no VS Code** devolve a pergunta para o VS Code. |
+| ✓ verde, **terminou** | **Ir para o VS Code** traz para a frente a janela do VS Code daquele projeto. **Ok** fecha o aviso. |
+
+- **Arraste** o widget para onde quiser. Ele lembra a posição.
+- **Botão direito → Fechar widget** fecha o widget. Os pedidos pendentes voltam para o VS Code. Ele abre de novo na próxima sessão ou no próximo pedido.
+- Com vários pedidos ou sessões, aparece quantos estão esperando (`+1 na fila`), e eles vêm um de cada vez.
+
+## Comportamentos importantes
+
+- **Nunca tira o foco.** Você continua digitando onde estava, mesmo quando clica nos botões. A única exceção é a **Outra resposta**: o widget pega o foco para você digitar e depois devolve.
+- **Limite de 5 minutos.** Se ninguém responder, o cartão fecha e o pedido vai para o VS Code normalmente.
+- **Longe do computador.** Sem uso de mouse nem teclado por 2 minutos, pedidos e perguntas não passam pelo widget e vão direto para o VS Code. Isso vale também para um cartão que já estava na tela. Se você usa o [Remote Control](https://code.claude.com/docs/en/remote-control), é assim que eles chegam no celular ou no navegador sem atraso.
+- **Sem aviso de "terminou" enquanto você está olhando.** Se a janela do VS Code daquele projeto já estiver na frente quando o Claude terminar, o aviso não aparece. Ele também some quando você manda uma mensagem nova naquela sessão, e depois de 12 horas.
+- **Aprovação de plano fica no VS Code.** Aprovar um plano (`ExitPlanMode`) nunca passa pelo widget.
+- **O que ele não faz:** mandar prompts novos. O Claude Code não tem um jeito suportado de enviar mensagens para uma sessão aberta no VS Code. Para isso, use o Remote Control.
+
+## Configuração
+
+Defina estas variáveis de ambiente no bloco `env` do `~/.claude/settings.json`:
+
+| Variável | Padrão | O que faz |
+| --- | --- | --- |
+| `CLAUDE_WIDGET_LANG` | idioma do Windows | `pt` ou `en`. Qualquer outro valor usa inglês. |
+| `CLAUDE_WIDGET_AWAY_SECS` | `120` | Segundos sem uso de mouse nem teclado até os pedidos deixarem de passar pelo widget. |
+
+```json
+{
+  "env": {
+    "CLAUDE_WIDGET_LANG": "pt"
+  }
+}
+```
+
+## Como funciona
+
+```
+Claude Code ──hook──▶ hook.ps1 ──queue\req-<id>.json──▶ widget.ps1 (WPF, sempre por cima)
+            ◀─JSON──           ◀──queue\res-<id>.json──
+```
+
+- O `hook.ps1` roda em cinco eventos de hook. No `PermissionRequest` e no `PreToolUse` do `AskUserQuestion`, ele grava um arquivo de pedido e espera a resposta do widget. Depois devolve a decisão no formato de hook do Claude Code. No `Stop` ele grava o aviso de "terminou", e no `UserPromptSubmit` apaga esse aviso. No `SessionStart` ele só garante que o widget está aberto.
+- O `widget.ps1` é um único processo que fica rodando, um por usuário. Ele é aberto fora da árvore de processos do Claude Code, então continua aberto quando a sessão acaba. Ele verifica a pasta da fila e mostra primeiro o item mais antigo.
+- Os arquivos ficam na pasta de dados do plugin, `%USERPROFILE%\.claude\plugins\data\claude-code-widget-claude-code-widget\`: a fila, a posição do widget (`state.json`) e os logs (`hook.log`, `widget.log`).
+
+## Segurança
+
+- Aprovar no widget é o mesmo que clicar em **Allow** no VS Code. O widget mostra o comando ou o caminho do arquivo inteiro antes de você decidir.
+- Tudo fica na sua máquina. O widget não acessa a rede e não coleta nenhum dado. Os únicos dados são os arquivos na pasta de dados do plugin, dentro do seu perfil de usuário.
+- Pedidos e respostas são arquivos comuns que só o seu usuário do Windows pode gravar. Um programa rodando como você conseguiria gravar uma resposta, mas um programa assim já conseguiria fazer qualquer coisa que você faz.
+- Aprovação de plano e tudo o que você não responder sempre voltam para a confirmação normal do Claude Code.
+
+## Problemas comuns
+
+- **O widget não aparece.** Abra uma sessão nova, ou rode `/reload-plugins`, e confira `claude plugin list`. Depois veja o `widget.log` na pasta de dados.
+- **Os pedidos continuam aparecendo só no VS Code.** Confira o `hook.log`. Cada evento grava uma linha lá, como `PermissionRequest 1a2b3c4d Bash -> allow`. Se não aparecer nada novo, os hooks não foram carregados.
+- **Texto com `?` ou acentos quebrados.** Verifique se os arquivos `.ps1` não foram salvos de novo com outra codificação. Eles precisam ficar só com caracteres ASCII; os textos da interface ficam no `strings.json` (UTF-8).
+
+## Desinstalar
+
+```powershell
+claude plugin uninstall claude-code-widget@claude-code-widget
+```
+
+O widget aberto não fica sabendo que o plugin foi removido. Feche com **botão direito → Fechar widget**, ou saia da sua conta do Windows.
+
+## Desenvolvimento
+
+- Validar o plugin e o marketplace: `claude plugin validate .` e `claude plugin validate plugins/claude-code-widget`.
+- Gerar de novo as imagens do README a partir do código real do widget: `powershell -NoProfile -File tools\render-screenshots.ps1`. Os dados de exemplo ficam em `tools/samples.json`.
+- Aumente o `version` em `plugins/claude-code-widget/.claude-plugin/plugin.json` a cada versão nova. Quem já instalou fica na versão antiga até o número mudar.
+
+## Licença
+
+[MIT](LICENSE)
