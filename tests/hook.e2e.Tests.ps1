@@ -127,6 +127,35 @@ Describe 'hook.ps1 end to end' {
         }
     }
 
+    # After a plugin update the old widget keeps running from the old folder; the hook finds it through
+    # the shared mutex name and widget.json, and replaces it. The test keeps holding the mutex, so the
+    # widget the hook starts in its place finds the mutex taken and exits at once (no window).
+    Context 'widget from another version' {
+        BeforeEach {
+            $fake = Start-Process powershell.exe -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', 'Start-Sleep 120'
+        }
+        AfterEach {
+            if (-not $fake.HasExited) { $fake.Kill() }
+        }
+
+        It 'replaces a widget started from another script path' {
+            Write-JsonAtomic (Join-Path $box.Data 'widget.json') @{ pid = $fake.Id; script = 'C:\old\1.1.0\scripts\widget.ps1' }
+            $r = Complete-Hook (Start-Hook $box (New-HookEvent 'SessionStart' $box.Data @{ source = 'startup' }))
+            $r.ExitCode | Should -Be 0
+            $r.Stdout | Should -BeNullOrEmpty
+            $fake.WaitForExit(5000) | Should -BeTrue
+            [IO.File]::ReadAllText((Join-Path $box.Data 'hook.log')) | Should -Match 'restarting widget from an older version'
+        }
+        It 'keeps a widget started from this version' {
+            $current = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $box.Hook) 'widget.ps1'))
+            Write-JsonAtomic (Join-Path $box.Data 'widget.json') @{ pid = $fake.Id; script = $current }
+            $r = Complete-Hook (Start-Hook $box (New-HookEvent 'SessionStart' $box.Data @{ source = 'startup' }))
+            $r.Stdout | Should -BeNullOrEmpty
+            $fake.HasExited | Should -BeFalse
+            [IO.File]::ReadAllText((Join-Path $box.Data 'hook.log')) | Should -Not -Match 'restarting'
+        }
+    }
+
     Context 'robustness' {
         It 'SessionStart prints nothing' {
             $r = Complete-Hook (Start-Hook $box (New-HookEvent 'SessionStart' $box.Data @{ source = 'startup' }))
