@@ -45,7 +45,7 @@ function Write-Log($msg) {
     $text = [string]$msg
     if ($text -eq $script:lastErr) { return }
     $script:lastErr = $text
-    try { Add-Content -LiteralPath $LogPath -Value ('{0:s} {1}' -f (Get-Date), $text) } catch {}
+    Write-LogLine $LogPath $text
 }
 
 try {

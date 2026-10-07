@@ -154,3 +154,41 @@ Describe 'Get-DoneNotices' {
         $stale | Should -Not -Exist
     }
 }
+
+Describe 'Write-LogLine' {
+    It 'appends a dated line, creating the folder' {
+        $path = Join-Path $TestDrive 'logs\a.log'
+        Write-LogLine $path 'first'
+        Write-LogLine $path 'second'
+        $lines = [IO.File]::ReadAllLines($path)
+        $lines.Count | Should -Be 2
+        $lines[1] | Should -Match '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d second$'
+    }
+    It 'moves the log to .old once it passes the limit, keeping a single .old' {
+        $path = Join-Path $TestDrive 'r.log'
+        [IO.File]::WriteAllText("$path.old", 'oldest')
+        [IO.File]::WriteAllText($path, ('x' * 200))
+        Write-LogLine $path 'new' 100
+        [IO.File]::ReadAllText("$path.old") | Should -BeExactly ('x' * 200)
+        $lines = @([IO.File]::ReadAllLines($path))
+        $lines.Count | Should -Be 1
+        $lines[0] | Should -Match ' new$'
+    }
+    It 'keeps appending while under the limit' {
+        $path = Join-Path $TestDrive 'u.log'
+        [IO.File]::WriteAllText($path, "line`r`n")
+        Write-LogLine $path 'more' 100
+        "$path.old" | Should -Not -Exist
+        @([IO.File]::ReadAllLines($path)).Count | Should -Be 2
+    }
+    It 'writes UTF-8 without BOM' {
+        $path = Join-Path $TestDrive 'utf.log'
+        $text = 'a' + [char]0x00E7 + [char]0x00E3 + 'o'
+        Write-LogLine $path $text
+        [IO.File]::ReadAllBytes($path)[0] | Should -Not -Be 0xEF
+        [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | Should -Match ([regex]::Escape($text))
+    }
+    It 'never throws, even when the log cannot be written' {
+        { Write-LogLine (Join-Path $TestDrive 'bad<>|.log') 'x' } | Should -Not -Throw
+    }
+}

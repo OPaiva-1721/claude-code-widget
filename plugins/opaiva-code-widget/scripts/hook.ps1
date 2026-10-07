@@ -43,16 +43,7 @@ $S = Get-Strings $Lang
 $MutexName = Get-MutexName $Data
 $script:waitEnd = $null
 
-function Write-HookLog([string]$msg) {
-    try {
-        New-Item -ItemType Directory -Force -Path $Data | Out-Null
-        if ((Test-Path -LiteralPath $LogPath) -and (Get-Item -LiteralPath $LogPath).Length -gt 256KB) {
-            Remove-Item -LiteralPath "$LogPath.old" -Force -ErrorAction SilentlyContinue
-            Rename-Item -LiteralPath $LogPath -NewName 'hook.log.old'
-        }
-        Add-Content -LiteralPath $LogPath -Value ('{0:s} {1}' -f (Get-Date), $msg)
-    } catch {}
-}
+function Write-HookLog([string]$msg) { Write-LogLine $LogPath $msg }
 
 function Test-Widget {
     try { [System.Threading.Mutex]::OpenExisting($MutexName).Dispose(); return $true } catch { return $false }

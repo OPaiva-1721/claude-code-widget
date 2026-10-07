@@ -85,3 +85,19 @@ function Get-DoneNotices([string]$Queue, [hashtable]$Cache, [int64]$MaxAgeMs) {
     foreach ($k in @($Cache.Keys)) { if (-not $names.ContainsKey($k)) { $Cache.Remove($k) } }
     return $list | Sort-Object -Property { [int64]$_.created } -Descending
 }
+
+# Appends "<date>T<time> <text>" to a log file (UTF-8). Past $MaxBytes the file first becomes
+# <file>.old (replacing the previous one), so a log never grows past about twice $MaxBytes.
+# Never throws: a log that cannot be written must not stop the hook or the widget.
+function Write-LogLine([string]$Path, [string]$Text, [int64]$MaxBytes = 256KB) {
+    try {
+        $dir = [IO.Path]::GetDirectoryName($Path)
+        if ($dir) { [void][IO.Directory]::CreateDirectory($dir) }
+        $file = [IO.FileInfo]::new($Path)
+        if ($file.Exists -and $file.Length -gt $MaxBytes) {
+            [IO.File]::Delete("$Path.old")
+            [IO.File]::Move($Path, "$Path.old")
+        }
+        [IO.File]::AppendAllText($Path, ('{0:s} {1}' -f (Get-Date), $Text) + "`r`n", (Get-Utf8NoBom))
+    } catch {}
+}
