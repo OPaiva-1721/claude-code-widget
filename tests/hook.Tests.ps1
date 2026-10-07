@@ -112,3 +112,15 @@ Describe 'Write-HookLog' {
         Remove-Item -LiteralPath $LogPath, "$LogPath.old" -Force
     }
 }
+
+Describe 'Get-WindowKind' {
+    It 'is <kind> for "<process>"' -ForEach @(
+        @{ process = 'Code.exe'; kind = 'vscode' }
+        @{ process = 'Code - Insiders.exe'; kind = 'vscode' }
+        @{ process = 'WindowsTerminal.exe'; kind = 'terminal' }
+        @{ process = 'explorer.exe'; kind = 'other' }
+        @{ process = ''; kind = 'other' }
+    ) {
+        Get-WindowKind $process | Should -BeExactly $kind
+    }
+}

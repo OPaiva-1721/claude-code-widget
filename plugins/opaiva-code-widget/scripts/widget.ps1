@@ -97,21 +97,19 @@ namespace ClaudeWidget {
             if (IsIconic(h)) ShowWindow(h, 9);
             return SetForegroundWindow(h);
         }
-        public static bool Focus(string app, string project) {
-            IntPtr found = IntPtr.Zero;
+        public static string Title(IntPtr h) {
+            var sb = new StringBuilder(512);
+            GetWindowText(h, sb, 512);
+            return sb.ToString();
+        }
+        // Visible windows whose title contains app, topmost first
+        public static IntPtr[] FindWindows(string app) {
+            var found = new System.Collections.Generic.List<IntPtr>();
             EnumWindows((h, l) => {
-                if (!IsWindowVisible(h)) return true;
-                var sb = new StringBuilder(512);
-                GetWindowText(h, sb, 512);
-                var t = sb.ToString();
-                if (t.IndexOf(app, StringComparison.OrdinalIgnoreCase) < 0) return true;
-                if (!string.IsNullOrEmpty(project) && t.IndexOf(project, StringComparison.OrdinalIgnoreCase) < 0) return true;
-                found = h;
-                return false;
+                if (IsWindowVisible(h) && Title(h).IndexOf(app, StringComparison.OrdinalIgnoreCase) >= 0) found.Add(h);
+                return true;
             }, IntPtr.Zero);
-            if (found == IntPtr.Zero) return false;
-            if (IsIconic(found)) ShowWindow(found, 9);
-            return SetForegroundWindow(found);
+            return found.ToArray();
         }
     }
 }
@@ -772,6 +770,16 @@ namespace ClaudeWidget {
         Update-View
     }
 
+    # The project's VS Code window (a title part equal to the project name), else any VS Code window
+    function Find-VsCodeWindow([string]$project) {
+        $windows = @([ClaudeWidget.WinFocus]::FindWindows('Visual Studio Code'))
+        foreach ($h in $windows) {
+            if (Test-TitleHasProject ([ClaudeWidget.WinFocus]::Title($h)) $project) { return $h }
+        }
+        if ($windows.Count -gt 0) { return $windows[0] }
+        return [IntPtr]::Zero
+    }
+
     function Close-DoneNotice([switch]$GoToSession) {
         $d = $script:currentDone
         if (-not $d -or (Test-ClickTooSoon)) { return }
@@ -783,9 +791,8 @@ namespace ClaudeWidget {
             # ...otherwise, for VS Code sessions, the project's VS Code window, or any VS Code window
             if (-not $focused -and [string]$d.kind -in @('', 'vscode')) {
                 $project = if ($d.cwd) { Split-Path -Leaf ([string]$d.cwd) } else { '' }
-                if (-not [ClaudeWidget.WinFocus]::Focus('Visual Studio Code', $project)) {
-                    [void][ClaudeWidget.WinFocus]::Focus('Visual Studio Code', '')
-                }
+                $h = Find-VsCodeWindow $project
+                if ($h -ne [IntPtr]::Zero) { [void][ClaudeWidget.WinFocus]::FocusHandle($h.ToInt64()) }
             }
         }
         Update-View

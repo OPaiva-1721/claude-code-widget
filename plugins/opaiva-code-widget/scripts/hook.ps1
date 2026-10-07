@@ -32,6 +32,8 @@ $LogPath = Join-Path $Data 'hook.log'
 # Processes that own a terminal window (classic console, Windows Terminal and common alternatives)
 $TerminalHosts = @('windowsterminal.exe', 'openconsole.exe', 'conhost.exe', 'powershell.exe', 'pwsh.exe', 'cmd.exe',
     'wezterm-gui.exe', 'alacritty.exe', 'mintty.exe', 'tabby.exe', 'hyper.exe')
+# Processes that own a VS Code window
+$VsCodeProcesses = @('code.exe', 'code - insiders.exe')
 $TimeoutSecs = 300
 $AwaySecs = 120
 if ($env:CLAUDE_WIDGET_AWAY_SECS) { $AwaySecs = [int]$env:CLAUDE_WIDGET_AWAY_SECS }
@@ -138,6 +140,14 @@ function Get-ProcessTree {
     return @{ map = $map; ancestors = $ancestors }
 }
 
+# vscode / terminal / other, from the name of the process that owns the window
+function Get-WindowKind([string]$ProcessName) {
+    $name = $ProcessName.ToLowerInvariant()
+    if ($VsCodeProcesses -contains $name) { return 'vscode' }
+    if ($TerminalHosts -contains $name) { return 'terminal' }
+    return 'other'
+}
+
 # On UserPromptSubmit the window in front is almost always where you typed. Remember it, but only
 # if it really belongs to this session: its owner (or the owner's parent, for a classic console
 # whose window belongs to conhost.exe) must be one of this hook's ancestors. A prompt sent from
@@ -158,9 +168,7 @@ function Save-SessionWindow([string]$sid, [string]$logTag) {
             return
         }
         $name = if ($owner) { ([string]$owner.Name).ToLowerInvariant() } else { '' }
-        $title = Get-WindowTitle $fg
-        $kind = if ($title.IndexOf('Visual Studio Code', [StringComparison]::OrdinalIgnoreCase) -ge 0) { 'vscode' }
-                elseif ($TerminalHosts -contains $name) { 'terminal' } else { 'other' }
+        $kind = Get-WindowKind $name
         New-Item -ItemType Directory -Force -Path $Sessions | Out-Null
         [IO.File]::WriteAllText((Join-Path $Sessions "$sid.json"), (@{ hwnd = $fg.ToInt64(); kind = $kind; process = $name } | ConvertTo-Json -Compress), $Utf8)
         Write-HookLog "$logTag session window saved ($kind, $name)"
@@ -194,7 +202,7 @@ function Test-UserWatching([string]$cwd, $sessionWindow) {
         $title = Get-WindowTitle $fg
         $project = Split-Path -Leaf $cwd
         return ($title.IndexOf('Visual Studio Code', [StringComparison]::OrdinalIgnoreCase) -ge 0) -and
-               ($title.IndexOf($project, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+               (Test-TitleHasProject $title $project)
     } catch { return $false }
 }
 

@@ -101,3 +101,14 @@ function Write-LogLine([string]$Path, [string]$Text, [int64]$MaxBytes = 256KB) {
         [IO.File]::AppendAllText($Path, ('{0:s} {1}' -f (Get-Date), $Text) + "`r`n", (Get-Utf8NoBom))
     } catch {}
 }
+
+# Does a window title name this project as a whole part of it? VS Code titles read
+# "[<dot> ]file - folder[ (Workspace)][ [WSL: Ubuntu]] - Visual Studio Code", so "widget" matches the
+# folder "widget" but not "claude-code-widget" nor a file "widget.ps1". Letter case is ignored.
+# (The unsaved-file dot goes in as the character itself: its regex escape (backslash, u, 25CF) does not match in .NET here.)
+function Test-TitleHasProject([string]$Title, [string]$Project) {
+    if (-not $Title -or -not $Project) { return $false }
+    $dot = [regex]::Escape([string][char]0x25CF)
+    $pattern = '(?i)(^|\s-\s)(' + $dot + '\s*)?' + [regex]::Escape($Project) + '(\s[(\[][^)\]]*[)\]])*(\s-\s|$)'
+    return [regex]::IsMatch($Title, $pattern)
+}

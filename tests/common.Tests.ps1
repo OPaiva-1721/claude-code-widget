@@ -192,3 +192,37 @@ Describe 'Write-LogLine' {
         { Write-LogLine (Join-Path $TestDrive 'bad<>|.log') 'x' } | Should -Not -Throw
     }
 }
+
+Describe 'Test-TitleHasProject' {
+    It 'matches "<title>"' -ForEach @(
+        @{ title = 'x.ps1 - widget - Visual Studio Code'; project = 'widget' }
+        @{ title = 'widget - Visual Studio Code'; project = 'widget' }
+        @{ title = 'x.ps1 - widget (Workspace) - Visual Studio Code'; project = 'widget' }
+        @{ title = 'x.ps1 - widget [WSL: Ubuntu] - Visual Studio Code'; project = 'widget' }
+        @{ title = 'x.ps1 - WIDGET - Visual Studio Code'; project = 'widget' }
+        @{ title = 'x.ps1 - my - app - Visual Studio Code'; project = 'my - app' }
+        @{ title = 'x.ps1 - c++ (x86) - Visual Studio Code'; project = 'c++ (x86)' }
+    ) {
+        Test-TitleHasProject $title $project | Should -BeTrue
+    }
+    It 'does not match "<title>"' -ForEach @(
+        @{ title = 'x.ps1 - claude-code-widget - Visual Studio Code'; project = 'widget' }
+        @{ title = 'widget.ps1 - other - Visual Studio Code'; project = 'widget' }
+        @{ title = 'x.ps1 - widgets - Visual Studio Code'; project = 'widget' }
+    ) {
+        Test-TitleHasProject $title $project | Should -BeFalse
+    }
+    It 'matches a title that starts with the unsaved-file dot' {
+        $dot = [string][char]0x25CF
+        Test-TitleHasProject "$dot widget - Visual Studio Code" 'widget' | Should -BeTrue
+        Test-TitleHasProject "$dot x.ps1 - widget - Visual Studio Code" 'widget' | Should -BeTrue
+    }
+    It 'matches a translated workspace suffix' {
+        $suffix = ' (Espa' + [char]0x00E7 + 'o de Trabalho)'
+        Test-TitleHasProject "x.ps1 - widget$suffix - Visual Studio Code" 'widget' | Should -BeTrue
+    }
+    It 'is false for an empty title or project' {
+        Test-TitleHasProject '' 'widget' | Should -BeFalse
+        Test-TitleHasProject 'x.ps1 - widget - Visual Studio Code' '' | Should -BeFalse
+    }
+}
