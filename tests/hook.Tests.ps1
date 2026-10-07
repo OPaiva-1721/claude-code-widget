@@ -100,3 +100,27 @@ Describe 'New-AnswerOutput' {
         $out.updatedInput.questions[0].question | Should -Be 'Which DB?'
     }
 }
+
+Describe 'Write-HookLog' {
+    # Already true before 2.0.1 (hook.ps1 had its own rotation); guards the switch to Write-LogLine
+    It 'moves hook.log to hook.log.old once it passes 256 KB' {
+        New-Item -ItemType Directory -Force -Path $Data | Out-Null
+        [IO.File]::WriteAllText($LogPath, ('x' * 300KB))
+        Write-HookLog 'after rotation'
+        "$LogPath.old" | Should -Exist
+        @([IO.File]::ReadAllLines($LogPath)).Count | Should -Be 1
+        Remove-Item -LiteralPath $LogPath, "$LogPath.old" -Force
+    }
+}
+
+Describe 'Get-WindowKind' {
+    It 'is <kind> for "<process>"' -ForEach @(
+        @{ process = 'Code.exe'; kind = 'vscode' }
+        @{ process = 'Code - Insiders.exe'; kind = 'vscode' }
+        @{ process = 'WindowsTerminal.exe'; kind = 'terminal' }
+        @{ process = 'explorer.exe'; kind = 'other' }
+        @{ process = ''; kind = 'other' }
+    ) {
+        Get-WindowKind $process | Should -BeExactly $kind
+    }
+}

@@ -153,4 +153,174 @@ Describe 'Get-DoneNotices' {
         @(Get-DoneNotices $queue $cache $maxAge).Count | Should -Be 0
         $stale | Should -Not -Exist
     }
+    It 'forgets cached notices whose file is gone' {
+        $path = New-TestNotice $queue 's1' ($now - 1000)
+        [void](Get-DoneNotices $queue $cache $maxAge)
+        $cache.Count | Should -Be 1
+        Remove-Item -LiteralPath $path
+        @(Get-DoneNotices $queue $cache $maxAge).Count | Should -Be 0
+        $cache.Count | Should -Be 0
+    }
+}
+
+Describe 'Write-LogLine' {
+    It 'appends a dated line, creating the folder' {
+        $path = Join-Path $TestDrive 'logs\a.log'
+        Write-LogLine $path 'first'
+        Write-LogLine $path 'second'
+        $lines = [IO.File]::ReadAllLines($path)
+        $lines.Count | Should -Be 2
+        $lines[1] | Should -Match '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d second$'
+    }
+    It 'moves the log to .old once it passes the limit, keeping a single .old' {
+        $path = Join-Path $TestDrive 'r.log'
+        [IO.File]::WriteAllText("$path.old", 'oldest')
+        [IO.File]::WriteAllText($path, ('x' * 200))
+        Write-LogLine $path 'new' 100
+        [IO.File]::ReadAllText("$path.old") | Should -BeExactly ('x' * 200)
+        $lines = @([IO.File]::ReadAllLines($path))
+        $lines.Count | Should -Be 1
+        $lines[0] | Should -Match ' new$'
+    }
+    It 'keeps appending while under the limit' {
+        $path = Join-Path $TestDrive 'u.log'
+        [IO.File]::WriteAllText($path, "line`r`n")
+        Write-LogLine $path 'more' 100
+        "$path.old" | Should -Not -Exist
+        @([IO.File]::ReadAllLines($path)).Count | Should -Be 2
+    }
+    It 'writes UTF-8 without BOM' {
+        $path = Join-Path $TestDrive 'utf.log'
+        $text = 'a' + [char]0x00E7 + [char]0x00E3 + 'o'
+        Write-LogLine $path $text
+        [IO.File]::ReadAllBytes($path)[0] | Should -Not -Be 0xEF
+        [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | Should -Match ([regex]::Escape($text))
+    }
+    It 'never throws, even when the log cannot be written' {
+        { Write-LogLine (Join-Path $TestDrive 'bad<>|.log') 'x' } | Should -Not -Throw
+    }
+}
+
+Describe 'Test-TitleHasProject' {
+    It 'matches "<title>"' -ForEach @(
+        @{ title = 'x.ps1 - widget - Visual Studio Code'; project = 'widget' }
+        @{ title = 'widget - Visual Studio Code'; project = 'widget' }
+        @{ title = 'x.ps1 - widget (Workspace) - Visual Studio Code'; project = 'widget' }
+        @{ title = 'x.ps1 - widget [WSL: Ubuntu] - Visual Studio Code'; project = 'widget' }
+        @{ title = 'x.ps1 - WIDGET - Visual Studio Code'; project = 'widget' }
+        @{ title = 'x.ps1 - my - app - Visual Studio Code'; project = 'my - app' }
+        @{ title = 'x.ps1 - c++ (x86) - Visual Studio Code'; project = 'c++ (x86)' }
+    ) {
+        Test-TitleHasProject $title $project | Should -BeTrue
+    }
+    It 'does not match "<title>"' -ForEach @(
+        @{ title = 'x.ps1 - claude-code-widget - Visual Studio Code'; project = 'widget' }
+        @{ title = 'widget.ps1 - other - Visual Studio Code'; project = 'widget' }
+        @{ title = 'x.ps1 - widgets - Visual Studio Code'; project = 'widget' }
+    ) {
+        Test-TitleHasProject $title $project | Should -BeFalse
+    }
+    It 'matches a title that starts with the unsaved-file dot' {
+        $dot = [string][char]0x25CF
+        Test-TitleHasProject "$dot widget - Visual Studio Code" 'widget' | Should -BeTrue
+        Test-TitleHasProject "$dot x.ps1 - widget - Visual Studio Code" 'widget' | Should -BeTrue
+    }
+    It 'matches a translated workspace suffix' {
+        $suffix = ' (Espa' + [char]0x00E7 + 'o de Trabalho)'
+        Test-TitleHasProject "x.ps1 - widget$suffix - Visual Studio Code" 'widget' | Should -BeTrue
+    }
+    It 'is false for an empty title or project' {
+        Test-TitleHasProject '' 'widget' | Should -BeFalse
+        Test-TitleHasProject 'x.ps1 - widget - Visual Studio Code' '' | Should -BeFalse
+    }
+}
+
+Describe 'Get-ScreenAreas' {
+    It 'lists at least one screen, exactly one of them the main one' {
+        $areas = @(Get-ScreenAreas)
+        $areas.Count | Should -BeGreaterThan 0
+        @($areas | Where-Object { $_.primary }).Count | Should -Be 1
+        foreach ($a in $areas) {
+            $a.right | Should -BeGreaterThan $a.left
+            $a.bottom | Should -BeGreaterThan $a.top
+        }
+    }
+    It 'uses the same units as WPF' {
+        $main = @(Get-ScreenAreas | Where-Object { $_.primary })[0]
+        $wa = [System.Windows.SystemParameters]::WorkArea
+        [math]::Abs($main.right - $wa.Right) | Should -BeLessOrEqual 1
+        [math]::Abs($main.bottom - $wa.Bottom) | Should -BeLessOrEqual 1
+    }
+}
+
+Describe 'Get-ScreenKey' {
+    BeforeAll { $main = @{ left = 0; top = 0; right = 2560; bottom = 1400; primary = $true } }
+    It 'is the same for the same screens' {
+        Get-ScreenKey @($main) | Should -BeExactly (Get-ScreenKey @($main.Clone()))
+    }
+    It 'changes when a screen changes' {
+        $moved = $main.Clone()
+        $moved.bottom = 1440
+        Get-ScreenKey @($moved) | Should -Not -BeExactly (Get-ScreenKey @($main))
+    }
+}
+
+Describe 'Resolve-Anchor' {
+    BeforeAll {
+        # Main screen 2560 x 1440 with a 40-pixel taskbar; a smaller screen on its left, bottom-aligned
+        $main = @{ left = 0; top = 0; right = 2560; bottom = 1400; primary = $true }
+        $side = @{ left = -1920; top = 360; right = 0; bottom = 1400; primary = $false }
+    }
+    It 'keeps a saved spot on the main screen' {
+        $a = Resolve-Anchor @{ right = 2000; bottom = 900 } @($main, $side)
+        $a.right | Should -Be 2000
+        $a.bottom | Should -Be 900
+        $a.saved | Should -BeTrue
+    }
+    It 'keeps a saved spot on another screen' {
+        $a = Resolve-Anchor @{ right = -300; bottom = 1200 } @($main, $side)
+        $a.right | Should -Be -300
+        $a.saved | Should -BeTrue
+    }
+    It 'moves a spot between screens of different sizes to the main corner' {
+        # Above the smaller screen: inside the box around both screens, but on neither of them
+        $a = Resolve-Anchor @{ right = -300; bottom = 200 } @($main, $side)
+        $a.right | Should -Be 2560
+        $a.bottom | Should -Be 1400
+        $a.saved | Should -BeFalse
+    }
+    It 'moves to the main corner when the saved screen is gone' {
+        $a = Resolve-Anchor @{ right = -300; bottom = 1200 } @($main)
+        $a.right | Should -Be 2560
+        $a.saved | Should -BeFalse
+    }
+    It 'goes back to the saved spot when its screen is back' {
+        $saved = @{ right = -300; bottom = 1200 }
+        (Resolve-Anchor $saved @($main)).saved | Should -BeFalse
+        $back = Resolve-Anchor $saved @($main, $side)
+        $back.right | Should -Be -300
+        $back.saved | Should -BeTrue
+    }
+    It 'uses the main corner without a saved spot' {
+        $a = Resolve-Anchor $null @($side, $main)
+        $a.right | Should -Be 2560
+        $a.bottom | Should -Be 1400
+    }
+    It 'uses the main corner when the saved spot lacks fields' {
+        $a = Resolve-Anchor ('{"x":5}' | ConvertFrom-Json) @($main)
+        $a.right | Should -Be 2560
+        $a.saved | Should -BeFalse
+    }
+    It 'reads a saved spot as loaded from state.json' {
+        $a = Resolve-Anchor ('{"right":2371.09,"bottom":878.6}' | ConvertFrom-Json) @($main)
+        $a.right | Should -Be 2371.09
+        $a.saved | Should -BeTrue
+    }
+    It 'uses the first screen when none is marked main' {
+        $a = Resolve-Anchor $null @(@{ left = 0; top = 0; right = 1920; bottom = 1040; primary = $false })
+        $a.right | Should -Be 1920
+    }
+    It 'returns nothing without screens' {
+        Resolve-Anchor @{ right = 2000; bottom = 900 } @() | Should -BeNullOrEmpty
+    }
 }

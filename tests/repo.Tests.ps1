@@ -17,13 +17,28 @@ BeforeDiscovery {
 Describe 'repository rules' {
     BeforeAll {
         $repo = Split-Path -Parent $PSScriptRoot
+        # Each line of a markdown file with the ##/### heading it sits under ({ section; text }).
+        # Lines inside ``` code blocks never start a section, even when they begin with #.
+        function Get-MarkdownLines([string]$Path) {
+            $section = ''
+            $code = $false
+            foreach ($line in [IO.File]::ReadAllLines($Path, [Text.Encoding]::UTF8)) {
+                if ($line -match '^\s*```') { $code = -not $code }
+                elseif (-not $code -and $line -match '^#{2,3} (.+)$') { $section = $Matches[1] }
+                [pscustomobject]@{ section = $section; text = $line }
+            }
+        }
         # Lines of a markdown file under the ##/### headings whose title matches $Heading
         function Get-MarkdownSection([string]$Path, [string]$Heading) {
-            $section = ''
-            foreach ($line in [IO.File]::ReadAllLines($Path, [Text.Encoding]::UTF8)) {
-                if ($line -match '^#{2,3} (.+)$') { $section = $Matches[1] }
-                if ($section -match $Heading) { $line }
-            }
+            Get-MarkdownLines $Path | Where-Object { $_.section -match $Heading } | ForEach-Object { $_.text }
+        }
+        # Lines outside the 2.0.0 migration section that still name the old plugin, with or without
+        # "@<marketplace>". The marketplace keeps the old name, so "marketplace update claude-code-widget" is fine.
+        function Get-OldPluginIdLines([string]$Path) {
+            Get-MarkdownLines $Path | Where-Object {
+                $_.section -notmatch '2\.0\.0' -and
+                $_.text -match '(?<![\w-])claude-code-widget@|plugin (install|uninstall|update|enable|disable) claude-code-widget(?![\w@-])'
+            } | ForEach-Object { $_.text }
         }
     }
 
@@ -54,6 +69,11 @@ Describe 'repository rules' {
         $offending | Should -BeNullOrEmpty
     }
 
+    # The workflow only reads the repository: its token should not be able to write to it
+    It '<name> limits the token permissions' -ForEach $workflows {
+        [IO.File]::ReadAllText($path) | Should -Match '(?m)^permissions:'
+    }
+
     # Claude Code 2.1.292+ rejects third-party plugin names that pass as Anthropic's own and warns
     # about any "claude" in a plugin name. A local CLI may be older and not check, so check here too.
     It 'marketplace plugin names are not reserved for Anthropic' {
@@ -78,16 +98,8 @@ Describe 'repository rules' {
     # After the rename the old plugin id only belongs in the migration steps ("2.0.0" section), and
     # there the old plugin is uninstalled before the new one is installed (both at once = two widgets)
     It '<name> uses the old plugin id only in the 2.0.0 section, uninstalling first' -ForEach $readmes {
-        $section = ''
-        $outside = @()
-        $migration = New-Object System.Collections.ArrayList
-        foreach ($line in [IO.File]::ReadAllLines($path, [Text.Encoding]::UTF8)) {
-            if ($line -match '^#{2,3} (.+)$') { $section = $Matches[1] }
-            if ($section -match '2\.0\.0') { [void]$migration.Add($line) }
-            elseif ($line -match 'claude-code-widget@claude-code-widget') { $outside += $line }
-        }
-        $outside | Should -BeNullOrEmpty
-        $text = $migration -join "`n"
+        @(Get-OldPluginIdLines $path) | Should -BeNullOrEmpty
+        $text = @(Get-MarkdownSection $path '2\.0\.0') -join "`n"
         $uninstall = $text.IndexOf('claude plugin uninstall claude-code-widget@claude-code-widget')
         $install = $text.IndexOf('claude plugin install opaiva-code-widget@claude-code-widget')
         $uninstall | Should -BeGreaterOrEqual 0
@@ -123,5 +135,30 @@ Describe 'repository rules' {
         $latest = Select-String -LiteralPath (Join-Path $repo 'CHANGELOG.md') -Pattern '^## (\d+\.\d+\.\d+)' | Select-Object -First 1
         $latest | Should -Not -BeNullOrEmpty
         $latest.Matches[0].Groups[1].Value | Should -Be $plugin.version
+    }
+
+    Context 'markdown helpers' {
+        BeforeAll {
+            $sample = Join-Path $TestDrive 'sample.md'
+            $fence = '```'
+            [IO.File]::WriteAllLines($sample, [string[]]@(
+                    '## Install'
+                    'Run /plugin install claude-code-widget now.'
+                    'claude plugin marketplace update claude-code-widget'
+                    'claude plugin install opaiva-code-widget@claude-code-widget'
+                    '### Renamed in 2.0.0'
+                    $fence
+                    '## not a heading'
+                    'claude plugin uninstall claude-code-widget@claude-code-widget'
+                    $fence
+                    'after the block'
+                ))
+        }
+        It 'ignores # lines inside code blocks' {
+            @(Get-MarkdownSection $sample '2\.0\.0') -contains 'after the block' | Should -BeTrue
+        }
+        It 'finds the old plugin id without "@" outside the migration section' {
+            (@(Get-OldPluginIdLines $sample) -join '|') | Should -BeExactly 'Run /plugin install claude-code-widget now.'
+        }
     }
 }

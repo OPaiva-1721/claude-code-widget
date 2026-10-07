@@ -45,7 +45,7 @@ function Write-Log($msg) {
     $text = [string]$msg
     if ($text -eq $script:lastErr) { return }
     $script:lastErr = $text
-    try { Add-Content -LiteralPath $LogPath -Value ('{0:s} {1}' -f (Get-Date), $text) } catch {}
+    Write-LogLine $LogPath $text
 }
 
 try {
@@ -97,21 +97,19 @@ namespace ClaudeWidget {
             if (IsIconic(h)) ShowWindow(h, 9);
             return SetForegroundWindow(h);
         }
-        public static bool Focus(string app, string project) {
-            IntPtr found = IntPtr.Zero;
+        public static string Title(IntPtr h) {
+            var sb = new StringBuilder(512);
+            GetWindowText(h, sb, 512);
+            return sb.ToString();
+        }
+        // Visible windows whose title contains app, topmost first
+        public static IntPtr[] FindWindows(string app) {
+            var found = new System.Collections.Generic.List<IntPtr>();
             EnumWindows((h, l) => {
-                if (!IsWindowVisible(h)) return true;
-                var sb = new StringBuilder(512);
-                GetWindowText(h, sb, 512);
-                var t = sb.ToString();
-                if (t.IndexOf(app, StringComparison.OrdinalIgnoreCase) < 0) return true;
-                if (!string.IsNullOrEmpty(project) && t.IndexOf(project, StringComparison.OrdinalIgnoreCase) < 0) return true;
-                found = h;
-                return false;
+                if (IsWindowVisible(h) && Title(h).IndexOf(app, StringComparison.OrdinalIgnoreCase) >= 0) found.Add(h);
+                return true;
             }, IntPtr.Zero);
-            if (found == IntPtr.Zero) return false;
-            if (IsIconic(found)) ShowWindow(found, 9);
-            return SetForegroundWindow(found);
+            return found.ToArray();
         }
     }
 }
@@ -332,25 +330,32 @@ namespace ClaudeWidget {
     $ui.BtnDismiss.Content = $S.ok
 
     # --- Position: anchored by the bottom-right corner, so the card grows up/left ---
+    # $script:savedAnchor is where you last dragged it (state.json). While that spot is on no screen
+    # (its monitor was unplugged), the widget uses the main screen's corner, and it goes back to the
+    # saved spot once that screen is back: only dragging writes state.json.
+    $script:savedAnchor = $null
+    try {
+        if (Test-Path -LiteralPath $StatePath) { $script:savedAnchor = [IO.File]::ReadAllText($StatePath, $Utf8) | ConvertFrom-Json }
+    } catch {}
     $wa = [System.Windows.SystemParameters]::WorkArea
     $script:anchorRight = $wa.Right
     $script:anchorBottom = $wa.Bottom
-    try {
-        if (Test-Path -LiteralPath $StatePath) {
-            $st = [IO.File]::ReadAllText($StatePath, $Utf8) | ConvertFrom-Json
-            $vl = [System.Windows.SystemParameters]::VirtualScreenLeft
-            $vt = [System.Windows.SystemParameters]::VirtualScreenTop
-            $vr = $vl + [System.Windows.SystemParameters]::VirtualScreenWidth
-            $vb = $vt + [System.Windows.SystemParameters]::VirtualScreenHeight
-            $sr = [double]$st.right
-            $sb = [double]$st.bottom
-            # Only reuse it if it still fits on screen (a monitor may have been unplugged)
-            if ($sr -gt $vl + 120 -and $sr -le $vr + 1 -and $sb -gt $vt + 60 -and $sb -le $vb + 1) {
-                $script:anchorRight = $sr
-                $script:anchorBottom = $sb
-            }
+    $script:screenKey = $null
+    # Re-resolves the anchor if the screens changed since the last call. Returns the new anchor
+    # (@{ right; bottom; saved }), or $null when nothing changed.
+    function Sync-Anchor {
+        $areas = @(Get-ScreenAreas)
+        $key = Get-ScreenKey $areas
+        if ($key -eq $script:screenKey) { return $null }
+        $script:screenKey = $key
+        $a = Resolve-Anchor $script:savedAnchor $areas
+        if ($a) {
+            $script:anchorRight = $a.right
+            $script:anchorBottom = $a.bottom
         }
-    } catch {}
+        return $a
+    }
+    try { [void](Sync-Anchor) } catch { Write-Log $_ }
 
     function Update-Position {
         $win.Left = [math]::Max([System.Windows.SystemParameters]::VirtualScreenLeft, $script:anchorRight - $win.ActualWidth)
@@ -368,13 +373,15 @@ namespace ClaudeWidget {
     })
 
     $win.Add_MouseLeftButtonDown({
+        $left = $win.Left
+        $top = $win.Top
         try { $win.DragMove() } catch {}
+        # A click without a move keeps the saved spot (its monitor may be unplugged right now)
+        if ($win.Left -eq $left -and $win.Top -eq $top) { return }
         $script:anchorRight = $win.Left + $win.ActualWidth
         $script:anchorBottom = $win.Top + $win.ActualHeight
-        try {
-            $state = @{ right = $script:anchorRight; bottom = $script:anchorBottom } | ConvertTo-Json -Compress
-            [IO.File]::WriteAllText($StatePath, $state, $Utf8)
-        } catch {}
+        $script:savedAnchor = @{ right = $script:anchorRight; bottom = $script:anchorBottom }
+        try { [IO.File]::WriteAllText($StatePath, ($script:savedAnchor | ConvertTo-Json -Compress), $Utf8) } catch {}
     })
 
     # --- State ---
@@ -772,6 +779,16 @@ namespace ClaudeWidget {
         Update-View
     }
 
+    # The project's VS Code window (a title part equal to the project name), else any VS Code window
+    function Find-VsCodeWindow([string]$project) {
+        $windows = @([ClaudeWidget.WinFocus]::FindWindows('Visual Studio Code'))
+        foreach ($h in $windows) {
+            if (Test-TitleHasProject ([ClaudeWidget.WinFocus]::Title($h)) $project) { return $h }
+        }
+        if ($windows.Count -gt 0) { return $windows[0] }
+        return [IntPtr]::Zero
+    }
+
     function Close-DoneNotice([switch]$GoToSession) {
         $d = $script:currentDone
         if (-not $d -or (Test-ClickTooSoon)) { return }
@@ -783,9 +800,8 @@ namespace ClaudeWidget {
             # ...otherwise, for VS Code sessions, the project's VS Code window, or any VS Code window
             if (-not $focused -and [string]$d.kind -in @('', 'vscode')) {
                 $project = if ($d.cwd) { Split-Path -Leaf ([string]$d.cwd) } else { '' }
-                if (-not [ClaudeWidget.WinFocus]::Focus('Visual Studio Code', $project)) {
-                    [void][ClaudeWidget.WinFocus]::Focus('Visual Studio Code', '')
-                }
+                $h = Find-VsCodeWindow $project
+                if ($h -ne [IntPtr]::Zero) { [void][ClaudeWidget.WinFocus]::FocusHandle($h.ToInt64()) }
             }
         }
         Update-View
@@ -881,7 +897,21 @@ namespace ClaudeWidget {
 
     $timer = New-Object System.Windows.Threading.DispatcherTimer
     $timer.Interval = [TimeSpan]::FromMilliseconds(400)
-    $timer.Add_Tick({ try { Update-View } catch { Write-Log $_ } })
+    $script:ticks = 0
+    $timer.Add_Tick({
+        try { Update-View } catch { Write-Log $_ }
+        # Every ~2 s: a monitor unplugged or back, a resolution change, the taskbar moved
+        $script:ticks++
+        if ($script:ticks % 5 -eq 0) {
+            try {
+                $a = Sync-Anchor
+                if ($a) {
+                    Update-Position
+                    Write-Log ('screens changed: anchor {0},{1} ({2})' -f [int]$a.right, [int]$a.bottom, $(if ($a.saved) { 'saved' } else { 'default' }))
+                }
+            } catch { Write-Log $_ }
+        }
+    })
     $win.Add_Closed({ $timer.Stop() })
     $timer.Start()
 
