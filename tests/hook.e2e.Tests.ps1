@@ -145,6 +145,8 @@ Describe 'hook.ps1 end to end' {
             $r.Stdout | Should -BeNullOrEmpty
             $fake.WaitForExit(5000) | Should -BeTrue
             [IO.File]::ReadAllText((Join-Path $box.Data 'hook.log')) | Should -Match 'restarting widget from an older version'
+            # The widget started in its place sees the mutex still taken (by the test) and steps aside
+            Wait-SandboxWidgetsExit $box | Should -BeTrue
         }
         It 'keeps a widget started from this version' {
             $current = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $box.Hook) 'widget.ps1'))

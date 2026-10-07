@@ -17,7 +17,29 @@ function New-HookSandbox {
     }
 }
 
+# Widget processes started for this sandbox: the hook starts a new widget when it replaces an old one
+function Get-SandboxWidgets($Sandbox) {
+    @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
+        Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($Sandbox.Data, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+}
+
+# While the test holds the mutex, such a widget finds it taken and exits on its own
+function Wait-SandboxWidgetsExit($Sandbox, [int]$TimeoutSec = 30) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    # @() at the call site: a single process comes back unwrapped, and a CimInstance has no Count
+    while (@(Get-SandboxWidgets $Sandbox).Count -gt 0) {
+        if ((Get-Date) -gt $deadline) { return $false }
+        Start-Sleep -Milliseconds 250
+    }
+    return $true
+}
+
 function Remove-HookSandbox($Sandbox) {
+    # Never release the mutex while a widget started for this sandbox is still starting up: it would
+    # take the free mutex and stay on screen, pointing at a deleted data folder
+    if (-not (Wait-SandboxWidgetsExit $Sandbox)) {
+        Get-SandboxWidgets $Sandbox | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    }
     if ($Sandbox.MutexHeld) { $Sandbox.Mutex.ReleaseMutex() }
     $Sandbox.Mutex.Dispose()
     Remove-Item -LiteralPath $Sandbox.Data -Recurse -Force -ErrorAction SilentlyContinue
