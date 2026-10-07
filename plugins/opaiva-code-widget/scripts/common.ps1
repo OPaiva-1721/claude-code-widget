@@ -1,4 +1,4 @@
-# claude-code-widget: helpers shared by hook.ps1 and widget.ps1 (Windows PowerShell 5.1).
+# opaiva-code-widget: helpers shared by hook.ps1 and widget.ps1 (Windows PowerShell 5.1).
 # Both load it with:  . (Join-Path $PSScriptRoot 'common.ps1')
 # Loading it only defines functions: no files, folders or preferences are touched.
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as ANSI.

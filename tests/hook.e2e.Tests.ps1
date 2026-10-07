@@ -1,6 +1,6 @@
 # End-to-end tests: hook.ps1 as a real process, JSON in on stdin, JSON out on stdout.
 BeforeAll {
-    . (Join-Path (Split-Path -Parent $PSScriptRoot) 'plugins\claude-code-widget\scripts\common.ps1')
+    . (Join-Path (Split-Path -Parent $PSScriptRoot) 'plugins\opaiva-code-widget\scripts\common.ps1')
     . (Join-Path $PSScriptRoot 'helpers\HookHarness.ps1')
     $pt = Get-Strings 'pt'
     function Get-QueueFiles($Sandbox, [string]$Filter = '*') {

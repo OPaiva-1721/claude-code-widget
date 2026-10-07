@@ -1,4 +1,4 @@
-# claude-code-widget: always-on-top desktop widget for Claude Code (Windows PowerShell 5.1 + WPF).
+# opaiva-code-widget: always-on-top desktop widget for Claude Code (Windows PowerShell 5.1 + WPF).
 # Never takes focus: it sits in a corner of the screen and shows, in this order of priority:
 #   1. requests written by hook.ps1 to queue\req-<id>.json, answered in queue\res-<id>.json
 #        kind=permission -> Approve / Deny / Decide in VS Code
@@ -13,7 +13,7 @@
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as ANSI. UI text lives in
 # strings.json (read explicitly as UTF-8).
 param(
-    [string]$DataDir = (Join-Path $env:USERPROFILE '.claude\claude-code-widget'),
+    [string]$DataDir = (Join-Path $env:USERPROFILE '.claude\opaiva-code-widget'),
     [string]$Lang = '',
     [string]$RenderSamples = '',
     [string]$OutDir = ''

@@ -11,7 +11,7 @@ function New-HookSandbox {
     return [pscustomobject]@{
         Data      = $dir
         Queue     = Join-Path $dir 'queue'
-        Hook      = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\plugins\claude-code-widget\scripts\hook.ps1'))
+        Hook      = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\plugins\opaiva-code-widget\scripts\hook.ps1'))
         Mutex     = New-Object System.Threading.Mutex($true, (Get-MutexName $dir))
         MutexHeld = $true
     }
