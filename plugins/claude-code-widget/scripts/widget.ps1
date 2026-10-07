@@ -21,19 +21,18 @@ param(
 $RenderMode = [bool]$RenderSamples
 $ErrorActionPreference = 'Stop'
 $Utf8 = New-Object System.Text.UTF8Encoding $false
+. (Join-Path $PSScriptRoot 'common.ps1')
 $Data = [IO.Path]::GetFullPath($DataDir).TrimEnd('\')
 $Queue = Join-Path $Data 'queue'
 $StatePath = Join-Path $Data 'state.json'
 $LogPath = Join-Path $Data 'widget.log'
 $DoneMaxAgeMs = 12 * 3600 * 1000
 
-if (-not $Lang) { $Lang = [Globalization.CultureInfo]::CurrentUICulture.TwoLetterISOLanguageName }
-if ($Lang -ne 'pt') { $Lang = 'en' }
-$S = ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'strings.json'), $Utf8) | ConvertFrom-Json).$Lang
+$Lang = Resolve-Lang $Lang
+$S = Get-Strings $Lang
 
 # One widget per data dir; hook.ps1 computes the same name to know whether the widget is running
-$hash = [Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Data.ToLowerInvariant()))
-$MutexName = 'Local\ClaudeCodeWidget-' + (($hash[0..5] | ForEach-Object { $_.ToString('x2') }) -join '')
+$MutexName = Get-MutexName $Data
 $mutex = $null
 if (-not $RenderMode) {
     $createdNew = $false
@@ -47,13 +46,6 @@ function Write-Log($msg) {
     if ($text -eq $script:lastErr) { return }
     $script:lastErr = $text
     try { Add-Content -LiteralPath $LogPath -Value ('{0:s} {1}' -f (Get-Date), $text) } catch {}
-}
-
-function Get-NowMs { [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
-
-function Write-JsonAtomic($path, $obj) {
-    [IO.File]::WriteAllText("$path.tmp", ($obj | ConvertTo-Json -Depth 5 -Compress), $Utf8)
-    [IO.File]::Move("$path.tmp", $path)
 }
 
 try {
@@ -474,54 +466,9 @@ namespace ClaudeWidget {
         else { $chip.Visibility = 'Collapsed' }
     }
 
-    function Get-Pending {
-        $now = Get-NowMs
-        $list = New-Object System.Collections.ArrayList
-        $names = @{}
-        foreach ($f in @(Get-ChildItem -LiteralPath $Queue -Filter 'req-*.json' -File -ErrorAction SilentlyContinue)) {
-            $names[$f.Name] = $true
-            $r = $script:cache[$f.Name]
-            if (-not $r) {
-                try { $r = [IO.File]::ReadAllText($f.FullName, $Utf8) | ConvertFrom-Json } catch { continue }
-                $script:cache[$f.Name] = $r
-            }
-            # The hook died (session interrupted) or the request expired -> orphan
-            $expired = ($now - [int64]$r.created) -gt (([int64]$r.timeout + 5) * 1000)
-            $alive = $null -ne (Get-Process -Id ([int]$r.pid) -ErrorAction SilentlyContinue)
-            if ($expired -or -not $alive) {
-                Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
-                continue
-            }
-            # Already answered, waiting for the hook to pick it up
-            if (Test-Path -LiteralPath (Join-Path $Queue "res-$($r.id).json")) { continue }
-            [void]$list.Add($r)
-        }
-        foreach ($k in @($script:cache.Keys)) { if (-not $names.ContainsKey($k)) { $script:cache.Remove($k) } }
-        return $list | Sort-Object { [int64]$_.created }
-    }
-
-    function Get-Done {
-        $now = Get-NowMs
-        $list = New-Object System.Collections.ArrayList
-        $names = @{}
-        foreach ($f in @(Get-ChildItem -LiteralPath $Queue -Filter 'done-*.json' -File -ErrorAction SilentlyContinue)) {
-            $names[$f.Name] = $true
-            $d = $script:doneCache[$f.Name]
-            if (-not $d) {
-                try { $d = [IO.File]::ReadAllText($f.FullName, $Utf8) | ConvertFrom-Json } catch { continue }
-                $d | Add-Member -NotePropertyName key -NotePropertyValue $f.Name -Force
-                $d | Add-Member -NotePropertyName file -NotePropertyValue $f.FullName -Force
-                $script:doneCache[$f.Name] = $d
-            }
-            if (($now - [int64]$d.created) -gt $DoneMaxAgeMs) {
-                Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
-                continue
-            }
-            [void]$list.Add($d)
-        }
-        foreach ($k in @($script:doneCache.Keys)) { if (-not $names.ContainsKey($k)) { $script:doneCache.Remove($k) } }
-        return $list | Sort-Object -Property { [int64]$_.created } -Descending
-    }
+    # Queue readers live in common.ps1; the caches keep each file from being re-read every tick
+    function Get-Pending { Get-PendingRequests $Queue $script:cache }
+    function Get-Done { Get-DoneNotices $Queue $script:doneCache $DoneMaxAgeMs }
 
     # ---------------- Permission request ----------------
     function Show-Permission($r) {

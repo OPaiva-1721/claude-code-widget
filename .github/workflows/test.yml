@@ -1,0 +1,43 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pester:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Pester 5
+        shell: powershell
+        run: Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck
+      - name: Run tests (Windows PowerShell 5.1)
+        shell: powershell
+        run: .\tools\test.ps1 -CI
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: testResults.xml
+
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      # One command per step: a PowerShell step only fails on its last command's exit code.
+      # continue-on-error: since Claude Code 2.1.292 the name "claude-code-widget" is reserved
+      # (third-party names cannot start with "claude-"). Installing still works; the plugin gets a
+      # new name in its own change, and then these two lines go away.
+      - name: Validate marketplace
+        continue-on-error: true
+        run: claude plugin validate .
+      - name: Validate plugin
+        continue-on-error: true
+        run: claude plugin validate plugins/claude-code-widget

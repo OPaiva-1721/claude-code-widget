@@ -99,6 +99,7 @@ Claude Code ──hook──▶ hook.ps1 ──queue\req-<id>.json──▶ widg
 
 - `hook.ps1` runs on five hook events. On `PermissionRequest` and on `PreToolUse` for `AskUserQuestion`, it writes a request file and waits for the widget's answer. Then it prints the decision in Claude Code's hook format. On `Stop` it writes a "finished" notice, and on `UserPromptSubmit` it clears it. On `UserPromptSubmit` it also remembers the window in front, but only if the process tree shows it belongs to that Claude Code session. A prompt sent from your phone leaves an unrelated window in front, so it is ignored. On `SessionStart` it only makes sure the widget is running.
 - `widget.ps1` is a single long-running process, one per user. It is started outside Claude Code's process tree, so it survives the end of a session. It polls the queue folder and shows the oldest item first.
+- `common.ps1` holds the helpers both scripts share: the widget's mutex name, atomic JSON writes, the UI language and the queue readers.
 - Files live in the plugin data folder, `%USERPROFILE%\.claude\plugins\data\claude-code-widget-claude-code-widget\`: the queue, each session's window (`sessions\`), the widget position (`state.json`) and logs (`hook.log`, `widget.log`).
 
 ## Security
@@ -125,6 +126,7 @@ The running widget doesn't know the plugin was removed, so close it with **right
 ## Development
 
 - Validate the plugin and the marketplace: `claude plugin validate .` and `claude plugin validate plugins/claude-code-widget`.
+- Run the tests: install [Pester 5](https://pester.dev) once with `Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck`, then run `powershell -NoProfile -File tools\test.ps1`. One test shows a widget in the corner of the screen for a few seconds; add `-ExcludeTag Desktop` to skip the tests that run the real widget. GitHub Actions runs the same suite on every push and pull request.
 - Regenerate the README images from the real widget code: `powershell -NoProfile -File tools\render-screenshots.ps1`. Sample data lives in `tools/samples.json`.
 - Bump `version` in `plugins/claude-code-widget/.claude-plugin/plugin.json` for every release. Installed copies stay on the old version until the number changes.
 

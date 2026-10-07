@@ -99,6 +99,7 @@ Claude Code ──hook──▶ hook.ps1 ──queue\req-<id>.json──▶ widg
 
 - O `hook.ps1` roda em cinco eventos de hook. No `PermissionRequest` e no `PreToolUse` do `AskUserQuestion`, ele grava um arquivo de pedido e espera a resposta do widget. Depois devolve a decisão no formato de hook do Claude Code. No `Stop` ele grava o aviso de "terminou", e no `UserPromptSubmit` apaga esse aviso. No `UserPromptSubmit` ele também guarda a janela que está na frente, mas só se a árvore de processos mostrar que ela é daquela sessão do Claude Code. Um prompt enviado pelo celular deixa outra janela qualquer na frente, então ele é ignorado. No `SessionStart` ele só garante que o widget está aberto.
 - O `widget.ps1` é um único processo que fica rodando, um por usuário. Ele é aberto fora da árvore de processos do Claude Code, então continua aberto quando a sessão acaba. Ele verifica a pasta da fila e mostra primeiro o item mais antigo.
+- O `common.ps1` reúne o que os dois scripts compartilham: o nome do mutex do widget, a gravação atômica de JSON, o idioma da interface e a leitura da fila.
 - Os arquivos ficam na pasta de dados do plugin, `%USERPROFILE%\.claude\plugins\data\claude-code-widget-claude-code-widget\`: a fila, a janela de cada sessão (`sessions\`), a posição do widget (`state.json`) e os logs (`hook.log`, `widget.log`).
 
 ## Segurança
@@ -125,6 +126,7 @@ O widget aberto não fica sabendo que o plugin foi removido. Feche com **botão 
 ## Desenvolvimento
 
 - Validar o plugin e o marketplace: `claude plugin validate .` e `claude plugin validate plugins/claude-code-widget`.
+- Rodar os testes: instale o [Pester 5](https://pester.dev) uma vez com `Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck` e depois rode `powershell -NoProfile -File tools\test.ps1`. Um dos testes mostra um widget no canto da tela por alguns segundos; use `-ExcludeTag Desktop` para pular os testes que abrem o widget de verdade. O GitHub Actions roda a mesma suíte a cada push e pull request.
 - Gerar de novo as imagens do README a partir do código real do widget: `powershell -NoProfile -File tools\render-screenshots.ps1`. Os dados de exemplo ficam em `tools/samples.json`.
 - Aumente o `version` em `plugins/claude-code-widget/.claude-plugin/plugin.json` a cada versão nova. Quem já instalou fica na versão antiga até o número mudar.
 
