@@ -1,5 +1,5 @@
 # claude-code-widget: Claude Code hook (Windows PowerShell 5.1).
-# One script for every event; the route comes from hook_event_name:
+# One script for every event; Invoke-Hook routes on hook_event_name:
 #   PermissionRequest            -> queue\req-<id>.json (kind=permission), waits for queue\res-<id>.json,
 #                                   prints allow/deny.
 #   PreToolUse (AskUserQuestion) -> queue\req-<id>.json (kind=question), waits for the answers,
@@ -14,11 +14,13 @@
 # straight to VS Code (and to your phone/browser when Remote Control is on).
 # No answer ("in VS Code", widget closed, idle or timeout) = no output -> Claude Code's normal flow.
 # Stop/UserPromptSubmit/SessionStart never print anything (it would end up in Claude's context).
+# Dot-sourcing this file (tests) only defines the functions; see the end of the file.
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as ANSI. UI text lives in
 # strings.json (read explicitly as UTF-8).
 param([switch]$EnsureWidget)
 $ErrorActionPreference = 'Stop'
 $Utf8 = New-Object System.Text.UTF8Encoding $false
+. (Join-Path $PSScriptRoot 'common.ps1')
 
 $WidgetScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'widget.ps1'))
 # Plugin data dir survives plugin updates; fallback for running the scripts outside a plugin
@@ -34,15 +36,10 @@ $TimeoutSecs = 300
 $AwaySecs = 120
 if ($env:CLAUDE_WIDGET_AWAY_SECS) { $AwaySecs = [int]$env:CLAUDE_WIDGET_AWAY_SECS }
 
-$Lang = if ($env:CLAUDE_WIDGET_LANG) { $env:CLAUDE_WIDGET_LANG } else { [Globalization.CultureInfo]::CurrentUICulture.TwoLetterISOLanguageName }
-if ($Lang -ne 'pt') { $Lang = 'en' }
-$S = ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'strings.json'), $Utf8) | ConvertFrom-Json).$Lang
+$Lang = Resolve-Lang $env:CLAUDE_WIDGET_LANG
+$S = Get-Strings $Lang
 
 # One widget per data dir; the widget computes the same name
-function Get-MutexName([string]$dir) {
-    $hash = [Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($dir.ToLowerInvariant()))
-    return 'Local\ClaudeCodeWidget-' + (($hash[0..5] | ForEach-Object { $_.ToString('x2') }) -join '')
-}
 $MutexName = Get-MutexName $Data
 $script:waitEnd = $null
 
@@ -85,12 +82,6 @@ function Start-Widget {
         Start-Sleep -Milliseconds 100
     }
     return $false
-}
-
-# Write to .tmp, then rename: the widget never reads a half-written file
-function Write-JsonAtomic($path, $obj) {
-    [IO.File]::WriteAllText("$path.tmp", ($obj | ConvertTo-Json -Depth 10 -Compress), $Utf8)
-    [IO.File]::Move("$path.tmp", $path)
 }
 
 # Hook output as pure ASCII (\uXXXX), independent of the PowerShell 5.1 console encoding
@@ -160,7 +151,7 @@ function Get-ProcessTree {
 # if it really belongs to this session: its owner (or the owner's parent, for a classic console
 # whose window belongs to conhost.exe) must be one of this hook's ancestors. A prompt sent from
 # your phone (Remote Control) leaves some unrelated window in front and is ignored.
-function Save-SessionWindow([string]$sid) {
+function Save-SessionWindow([string]$sid, [string]$logTag) {
     if (-not $sid) { return }
     try {
         Initialize-Win32
@@ -268,16 +259,16 @@ function Wait-Response([string]$id) {
     return $null
 }
 
-function New-Request([string]$kind, [hashtable]$fields) {
+function New-Request([string]$kind, [string]$cwd, [hashtable]$fields) {
     New-Item -ItemType Directory -Force -Path $Queue | Out-Null
     $id = [guid]::NewGuid().ToString('N')
     $req = [ordered]@{
         id      = $id
         pid     = $PID
         kind    = $kind
-        created = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        created = Get-NowMs
         timeout = $TimeoutSecs
-        cwd     = [string]$evt.cwd
+        cwd     = $cwd
     }
     foreach ($k in $fields.Keys) { $req[$k] = $fields[$k] }
     Write-JsonAtomic (Join-Path $Queue "req-$id.json") $req
@@ -288,132 +279,145 @@ function Remove-Request([string]$id) {
     Remove-Item -LiteralPath (Join-Path $Queue "req-$id.json"), (Join-Path $Queue "res-$id.json") -Force -ErrorAction SilentlyContinue
 }
 
+# What the permission card shows: the command, file, URL or query; otherwise the raw input
+function Get-PermissionDetail($ToolInput) {
+    if ($ToolInput.command) { $detail = [string]$ToolInput.command }
+    elseif ($ToolInput.file_path) { $detail = [string]$ToolInput.file_path }
+    elseif ($ToolInput.notebook_path) { $detail = [string]$ToolInput.notebook_path }
+    elseif ($ToolInput.url) { $detail = [string]$ToolInput.url }
+    elseif ($ToolInput.query) { $detail = [string]$ToolInput.query }
+    else { $detail = [string]($ToolInput | ConvertTo-Json -Depth 4 -Compress) }
+    if ($detail.Length -gt 2000) { $detail = $detail.Substring(0, 2000) + ' ...' }
+    return $detail
+}
+
+# PermissionRequest answer in Claude Code's hook format; deny carries a message for Claude
+function New-PermissionOutput([string]$Behavior, [string]$Message) {
+    $decision = [ordered]@{ behavior = $Behavior }
+    if ($Behavior -eq 'deny') { $decision.message = $Message }
+    return [ordered]@{ hookSpecificOutput = [ordered]@{ hookEventName = 'PermissionRequest'; decision = $decision } }
+}
+
+# AskUserQuestion answered: allow the tool with updatedInput = the original input + answers
+# (question text -> chosen label, or free text)
+function New-AnswerOutput($ToolInput, $Answers, [string]$Reason) {
+    $ToolInput | Add-Member -NotePropertyName answers -NotePropertyValue $Answers -Force
+    return [ordered]@{
+        hookSpecificOutput = [ordered]@{
+            hookEventName            = 'PreToolUse'
+            permissionDecision       = 'allow'
+            permissionDecisionReason = $Reason
+            updatedInput             = $ToolInput
+        }
+    }
+}
+
+# Routes one hook event. Returns the JSON to print, or $null = no output (Claude Code's normal flow).
+# Nothing in here may write to the pipeline except the return value: Claude Code reads stdout.
+function Invoke-Hook($evt) {
+    $hookEvent = [string]$evt.hook_event_name
+    $sid = ([string]$evt.session_id) -replace '[^A-Za-z0-9-]', ''
+    $logTag = '{0} {1}' -f $hookEvent, $sid.Substring(0, [math]::Min(8, $sid.Length))
+    $tool = [string]$evt.tool_name
+    $in = $evt.tool_input
+    $cwd = [string]$evt.cwd
+
+    if ($hookEvent -eq 'SessionStart') { Write-HookLog $logTag; [void](Start-Widget); return $null }
+
+    if ($hookEvent -eq 'UserPromptSubmit') {
+        Write-HookLog $logTag
+        Remove-Done $sid
+        Save-SessionWindow $sid $logTag
+        return $null
+    }
+
+    if ($hookEvent -eq 'Stop') {
+        if (-not $sid) { return $null }
+        Remove-Done $sid
+        $sessionWindow = Get-SessionWindow $sid
+        if (Test-UserWatching $cwd $sessionWindow) { Write-HookLog "$logTag no notice (session window in front)"; return $null }
+        $msg = Format-Snippet (Get-LastAssistantText $evt)
+        if (-not $msg) { $msg = $S.readyNext }
+        New-Item -ItemType Directory -Force -Path $Queue | Out-Null
+        $now = Get-NowMs
+        Write-JsonAtomic (Join-Path $Queue "done-$sid-$now.json") ([ordered]@{
+            session = $sid
+            created = $now
+            cwd     = $cwd
+            message = $msg
+            # Lets the widget's button go back to that exact window (VS Code or terminal)
+            hwnd    = $(if ($sessionWindow) { [int64]$sessionWindow.hwnd } else { 0 })
+            kind    = $(if ($sessionWindow) { [string]$sessionWindow.kind } else { '' })
+        })
+        Write-HookLog "$logTag notice created"
+        [void](Start-Widget)
+        return $null
+    }
+
+    # ---------------- PreToolUse: multiple-choice questions ----------------
+    if ($hookEvent -eq 'PreToolUse') {
+        if ($tool -ne 'AskUserQuestion') { return $null }
+        $questions = @($in.questions)
+        if ($questions.Count -eq 0) { return $null }
+        if (Test-Away) { Write-HookLog "$logTag idle: question goes to VS Code"; return $null }
+        if (-not (Start-Widget)) { Write-HookLog "$logTag widget did not start"; return $null }
+        Remove-Done $sid
+
+        $id = New-Request 'question' $cwd @{
+            tool        = $tool
+            description = [string]$questions[0].question
+            questions   = $questions
+        }
+        try { $res = Wait-Response $id } finally { Remove-Request $id }
+
+        if ($res -and $res.decision -eq 'answer' -and $res.answers) {
+            Write-HookLog "$logTag answered in the widget"
+            return ConvertTo-AsciiJson (New-AnswerOutput $in $res.answers $S.answeredReason)
+        }
+        $why = if ($res) { [string]$res.decision } else { $script:waitEnd }
+        Write-HookLog "$logTag goes to VS Code ($why)"
+        return $null
+    }
+
+    # ---------------- PermissionRequest ----------------
+    if ($hookEvent -eq 'PermissionRequest') {
+        # These already need the screen (questions, plan approval) -> normal flow
+        if ($tool -in @('AskUserQuestion', 'ExitPlanMode')) { return $null }
+        if (Test-Away) { Write-HookLog "$logTag $tool idle: goes to VS Code"; return $null }
+
+        $detail = Get-PermissionDetail $in
+        $desc = [string]$in.description
+        if (-not $desc) { $desc = $S.wantsTool -f $tool }
+
+        # Widget did not come up -> don't keep Claude Code waiting for nobody
+        if (-not (Start-Widget)) { Write-HookLog "$logTag widget did not start"; return $null }
+        # The session is working again: its previous "finished" notice is stale
+        Remove-Done $sid
+
+        $id = New-Request 'permission' $cwd @{
+            tool        = $tool
+            description = $desc
+            detail      = $detail
+        }
+        try { $res = Wait-Response $id } finally { Remove-Request $id }
+
+        $decision = if ($res) { [string]$res.decision } else { $null }
+        Write-HookLog ("$logTag $tool -> " + $(if ($decision) { $decision } else { $script:waitEnd }))
+        if ($decision -in @('allow', 'deny')) { return ConvertTo-AsciiJson (New-PermissionOutput $decision $S.deniedMessage) }
+        return $null
+    }
+
+    return $null
+}
+
+# Loaded with dot-source (tests): stop here, only the functions above are wanted
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 if ($EnsureWidget) { [void](Start-Widget); exit 0 }
 
 [Console]::InputEncoding = [Text.Encoding]::UTF8
 # Not "$data": PowerShell variable names are case-insensitive and $Data is the data folder
 try { $evt = [Console]::In.ReadToEnd() | ConvertFrom-Json } catch { exit 0 }
-
-$hookEvent = [string]$evt.hook_event_name
-$sid = ([string]$evt.session_id) -replace '[^A-Za-z0-9-]', ''
-$logTag = '{0} {1}' -f $hookEvent, $sid.Substring(0, [math]::Min(8, $sid.Length))
-$tool = [string]$evt.tool_name
-$in = $evt.tool_input
-
-if ($hookEvent -eq 'SessionStart') { Write-HookLog $logTag; [void](Start-Widget); exit 0 }
-
-if ($hookEvent -eq 'UserPromptSubmit') {
-    Write-HookLog $logTag
-    Remove-Done $sid
-    Save-SessionWindow $sid
-    exit 0
-}
-
-if ($hookEvent -eq 'Stop') {
-    if (-not $sid) { exit 0 }
-    Remove-Done $sid
-    $cwd = [string]$evt.cwd
-    $sessionWindow = Get-SessionWindow $sid
-    if (Test-UserWatching $cwd $sessionWindow) { Write-HookLog "$logTag no notice (session window in front)"; exit 0 }
-    $msg = Format-Snippet (Get-LastAssistantText $evt)
-    if (-not $msg) { $msg = $S.readyNext }
-    New-Item -ItemType Directory -Force -Path $Queue | Out-Null
-    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    Write-JsonAtomic (Join-Path $Queue "done-$sid-$now.json") ([ordered]@{
-        session = $sid
-        created = $now
-        cwd     = $cwd
-        message = $msg
-        # Lets the widget's button go back to that exact window (VS Code or terminal)
-        hwnd    = $(if ($sessionWindow) { [int64]$sessionWindow.hwnd } else { 0 })
-        kind    = $(if ($sessionWindow) { [string]$sessionWindow.kind } else { '' })
-    })
-    Write-HookLog "$logTag notice created"
-    [void](Start-Widget)
-    exit 0
-}
-
-# ---------------- PreToolUse: multiple-choice questions ----------------
-if ($hookEvent -eq 'PreToolUse') {
-    if ($tool -ne 'AskUserQuestion') { exit 0 }
-    $questions = @($in.questions)
-    if ($questions.Count -eq 0) { exit 0 }
-    if (Test-Away) { Write-HookLog "$logTag idle: question goes to VS Code"; exit 0 }
-    if (-not (Start-Widget)) { Write-HookLog "$logTag widget did not start"; exit 0 }
-    Remove-Done $sid
-
-    $id = New-Request 'question' @{
-        tool        = $tool
-        description = [string]$questions[0].question
-        questions   = $questions
-    }
-    try { $res = Wait-Response $id } finally { Remove-Request $id }
-
-    if ($res -and $res.decision -eq 'answer' -and $res.answers) {
-        # updatedInput = original input + answers (question text -> chosen label, or free text)
-        $in | Add-Member -NotePropertyName answers -NotePropertyValue $res.answers -Force
-        Write-HookLog "$logTag answered in the widget"
-        ConvertTo-AsciiJson ([ordered]@{
-            hookSpecificOutput = [ordered]@{
-                hookEventName            = 'PreToolUse'
-                permissionDecision       = 'allow'
-                permissionDecisionReason = $S.answeredReason
-                updatedInput             = $in
-            }
-        })
-    }
-    else {
-        $why = if ($res) { [string]$res.decision } else { $script:waitEnd }
-        Write-HookLog "$logTag goes to VS Code ($why)"
-    }
-    exit 0
-}
-
-# ---------------- PermissionRequest ----------------
-if ($hookEvent -eq 'PermissionRequest') {
-    # These already need the screen (questions, plan approval) -> normal flow
-    if ($tool -in @('AskUserQuestion', 'ExitPlanMode')) { exit 0 }
-    if (Test-Away) { Write-HookLog "$logTag $tool idle: goes to VS Code"; exit 0 }
-
-    if ($in.command) { $detail = [string]$in.command }
-    elseif ($in.file_path) { $detail = [string]$in.file_path }
-    elseif ($in.notebook_path) { $detail = [string]$in.notebook_path }
-    elseif ($in.url) { $detail = [string]$in.url }
-    elseif ($in.query) { $detail = [string]$in.query }
-    else { $detail = $in | ConvertTo-Json -Depth 4 -Compress }
-    if ($detail.Length -gt 2000) { $detail = $detail.Substring(0, 2000) + ' ...' }
-
-    $desc = [string]$in.description
-    if (-not $desc) { $desc = $S.wantsTool -f $tool }
-
-    # Widget did not come up -> don't keep Claude Code waiting for nobody
-    if (-not (Start-Widget)) { Write-HookLog "$logTag widget did not start"; exit 0 }
-    # The session is working again: its previous "finished" notice is stale
-    Remove-Done $sid
-
-    $id = New-Request 'permission' @{
-        tool        = $tool
-        description = $desc
-        detail      = $detail
-    }
-    try { $res = Wait-Response $id } finally { Remove-Request $id }
-
-    $decision = if ($res) { [string]$res.decision } else { $null }
-    Write-HookLog ("$logTag $tool -> " + $(if ($decision) { $decision } else { $script:waitEnd }))
-    if ($decision -eq 'allow') {
-        ConvertTo-AsciiJson ([ordered]@{
-            hookSpecificOutput = [ordered]@{ hookEventName = 'PermissionRequest'; decision = [ordered]@{ behavior = 'allow' } }
-        })
-    }
-    elseif ($decision -eq 'deny') {
-        ConvertTo-AsciiJson ([ordered]@{
-            hookSpecificOutput = [ordered]@{
-                hookEventName = 'PermissionRequest'
-                decision      = [ordered]@{ behavior = 'deny'; message = $S.deniedMessage }
-            }
-        })
-    }
-    exit 0
-}
-
+$out = Invoke-Hook $evt
+if ($out) { $out }
 exit 0
