@@ -66,3 +66,91 @@ Describe 'Get-NowMs' {
         [math]::Abs((Get-NowMs) - $expected) | Should -BeLessThan 5000
     }
 }
+
+Describe 'Get-PendingRequests' {
+    BeforeAll {
+        $deadPid = 2147483640   # no process has this id
+        function New-TestRequest([string]$Queue, [string]$Id, [int64]$Created, [int]$OwnerPid = $PID, [int]$Timeout = 300) {
+            $req = [ordered]@{ id = $Id; pid = $OwnerPid; kind = 'permission'; created = $Created; timeout = $Timeout; cwd = 'C:\dev\app' }
+            [IO.File]::WriteAllText((Join-Path $Queue "req-$Id.json"), ($req | ConvertTo-Json -Compress))
+        }
+        function Get-Ids($Items) { (@($Items) | ForEach-Object { $_.id }) -join ',' }
+    }
+    BeforeEach {
+        $queue = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $queue | Out-Null
+        $cache = @{}
+        $now = Get-NowMs
+    }
+
+    It 'returns live requests oldest first' {
+        New-TestRequest $queue 'newer' ($now - 1000)
+        New-TestRequest $queue 'older' ($now - 2000)
+        Get-Ids (Get-PendingRequests $queue $cache) | Should -BeExactly 'older,newer'
+    }
+    It 'deletes expired requests' {
+        New-TestRequest $queue 'old' ($now - 400 * 1000) -Timeout 300
+        @(Get-PendingRequests $queue $cache).Count | Should -Be 0
+        Join-Path $queue 'req-old.json' | Should -Not -Exist
+    }
+    It 'deletes requests whose hook process is gone' {
+        New-TestRequest $queue 'orphan' $now -OwnerPid $deadPid
+        @(Get-PendingRequests $queue $cache).Count | Should -Be 0
+        Join-Path $queue 'req-orphan.json' | Should -Not -Exist
+    }
+    It 'skips answered requests without deleting them' {
+        New-TestRequest $queue 'answered' $now
+        [IO.File]::WriteAllText((Join-Path $queue 'res-answered.json'), '{"decision":"allow"}')
+        @(Get-PendingRequests $queue $cache).Count | Should -Be 0
+        Join-Path $queue 'req-answered.json' | Should -Exist
+    }
+    It 'ignores files that are not valid JSON' {
+        [IO.File]::WriteAllText((Join-Path $queue 'req-bad.json'), '{not json')
+        New-TestRequest $queue 'good' $now
+        Get-Ids (Get-PendingRequests $queue $cache) | Should -BeExactly 'good'
+    }
+    It 'forgets cached requests whose file is gone' {
+        New-TestRequest $queue 'gone' $now
+        [void](Get-PendingRequests $queue $cache)
+        $cache.ContainsKey('req-gone.json') | Should -BeTrue
+        Remove-Item -LiteralPath (Join-Path $queue 'req-gone.json')
+        [void](Get-PendingRequests $queue $cache)
+        $cache.ContainsKey('req-gone.json') | Should -BeFalse
+    }
+    It 'returns nothing when the queue folder does not exist' {
+        @(Get-PendingRequests (Join-Path $TestDrive 'missing') $cache).Count | Should -Be 0
+    }
+}
+
+Describe 'Get-DoneNotices' {
+    BeforeAll {
+        $maxAge = 12 * 3600 * 1000
+        function New-TestNotice([string]$Queue, [string]$Session, [int64]$Created) {
+            $path = Join-Path $Queue "done-$Session-$Created.json"
+            $notice = [ordered]@{ session = $Session; created = $Created; cwd = 'C:\dev\app'; message = 'hi'; hwnd = 0; kind = '' }
+            [IO.File]::WriteAllText($path, ($notice | ConvertTo-Json -Compress))
+            return $path
+        }
+    }
+    BeforeEach {
+        $queue = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $queue | Out-Null
+        $cache = @{}
+        $now = Get-NowMs
+    }
+
+    It 'returns notices newest first, with key and file' {
+        [void](New-TestNotice $queue 's1' ($now - 60000))
+        $newest = New-TestNotice $queue 's2' ($now - 1000)
+        $list = @(Get-DoneNotices $queue $cache $maxAge)
+        (($list | ForEach-Object { $_.session }) -join ',') | Should -BeExactly 's2,s1'
+        $list[0].key | Should -BeExactly (Split-Path -Leaf $newest)
+        Split-Path -Leaf $list[0].file | Should -BeExactly (Split-Path -Leaf $newest)
+        $list[0].file | Should -Exist
+    }
+    It 'deletes notices older than the maximum age' {
+        $stale = New-TestNotice $queue 'stale' ($now - $maxAge - 60000)
+        @(Get-DoneNotices $queue $cache $maxAge).Count | Should -Be 0
+        $stale | Should -Not -Exist
+    }
+}

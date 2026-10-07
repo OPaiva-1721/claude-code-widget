@@ -33,3 +33,55 @@ function Get-Strings([string]$Lang) {
 }
 
 function Get-NowMs { [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
+
+# Requests waiting for an answer, oldest first. Deletes orphans: expired, or the hook that wrote
+# them is gone (session interrupted). Skips requests already answered (res-<id>.json), waiting for
+# the hook to pick the answer up. $Cache (file name -> request) avoids re-reading files.
+function Get-PendingRequests([string]$Queue, [hashtable]$Cache) {
+    $now = Get-NowMs
+    $list = New-Object System.Collections.ArrayList
+    $names = @{}
+    foreach ($f in @(Get-ChildItem -LiteralPath $Queue -Filter 'req-*.json' -File -ErrorAction SilentlyContinue)) {
+        $names[$f.Name] = $true
+        $r = $Cache[$f.Name]
+        if (-not $r) {
+            try { $r = [IO.File]::ReadAllText($f.FullName, (Get-Utf8NoBom)) | ConvertFrom-Json } catch { continue }
+            $Cache[$f.Name] = $r
+        }
+        $expired = ($now - [int64]$r.created) -gt (([int64]$r.timeout + 5) * 1000)
+        $alive = $null -ne (Get-Process -Id ([int]$r.pid) -ErrorAction SilentlyContinue)
+        if ($expired -or -not $alive) {
+            Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
+            continue
+        }
+        if (Test-Path -LiteralPath (Join-Path $Queue "res-$($r.id).json")) { continue }
+        [void]$list.Add($r)
+    }
+    foreach ($k in @($Cache.Keys)) { if (-not $names.ContainsKey($k)) { $Cache.Remove($k) } }
+    return $list | Sort-Object { [int64]$_.created }
+}
+
+# "Claude finished" notices, newest first, each with key (file name) and file (full path).
+# Deletes notices older than $MaxAgeMs. $Cache (file name -> notice) avoids re-reading files.
+function Get-DoneNotices([string]$Queue, [hashtable]$Cache, [int64]$MaxAgeMs) {
+    $now = Get-NowMs
+    $list = New-Object System.Collections.ArrayList
+    $names = @{}
+    foreach ($f in @(Get-ChildItem -LiteralPath $Queue -Filter 'done-*.json' -File -ErrorAction SilentlyContinue)) {
+        $names[$f.Name] = $true
+        $d = $Cache[$f.Name]
+        if (-not $d) {
+            try { $d = [IO.File]::ReadAllText($f.FullName, (Get-Utf8NoBom)) | ConvertFrom-Json } catch { continue }
+            $d | Add-Member -NotePropertyName key -NotePropertyValue $f.Name -Force
+            $d | Add-Member -NotePropertyName file -NotePropertyValue $f.FullName -Force
+            $Cache[$f.Name] = $d
+        }
+        if (($now - [int64]$d.created) -gt $MaxAgeMs) {
+            Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
+            continue
+        }
+        [void]$list.Add($d)
+    }
+    foreach ($k in @($Cache.Keys)) { if (-not $names.ContainsKey($k)) { $Cache.Remove($k) } }
+    return $list | Sort-Object -Property { [int64]$_.created } -Descending
+}
