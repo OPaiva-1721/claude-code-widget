@@ -71,7 +71,8 @@ function Start-Hook {
     $psi.RedirectStandardError = $true
     $psi.EnvironmentVariables['CLAUDE_PLUGIN_DATA'] = $Sandbox.Data
     $psi.EnvironmentVariables['CLAUDE_WIDGET_LANG'] = 'pt'
-    $psi.EnvironmentVariables['CLAUDE_WIDGET_AWAY_SECS'] = '100000'
+    # Far above any uptime: a CI machine that has had no input since boot is never "away"
+    $psi.EnvironmentVariables['CLAUDE_WIDGET_AWAY_SECS'] = '2000000000'
     foreach ($k in $Env.Keys) { $psi.EnvironmentVariables[$k] = [string]$Env[$k] }
     $proc = [Diagnostics.Process]::Start($psi)
     $text = if ($PSBoundParameters.ContainsKey('RawInput')) { $RawInput } else { $HookInput | ConvertTo-Json -Depth 10 -Compress }

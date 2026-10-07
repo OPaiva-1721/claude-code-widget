@@ -1,4 +1,4 @@
-# Runs the automated tests in tests\ with Pester 5, on Windows PowerShell 5.1 (the plugin's runtime).
+# Runs the automated tests in tests\ with Pester 5.5 or later, on Windows PowerShell 5.1 (the plugin's runtime).
 #   powershell -NoProfile -File tools\test.ps1                      all tests, detailed output
 #   powershell -NoProfile -File tools\test.ps1 -CI                  also writes testResults.xml (GitHub Actions)
 #   powershell -NoProfile -File tools\test.ps1 -ExcludeTag Desktop  skips the tests that open widget windows

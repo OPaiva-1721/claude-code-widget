@@ -150,7 +150,7 @@ The running widget doesn't know the plugin was removed, so close it with **right
 ## Development
 
 - Validate the plugin and the marketplace: `claude plugin validate .` and `claude plugin validate plugins/opaiva-code-widget`.
-- Run the tests: install [Pester 5](https://pester.dev) once with `Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck`, then run `powershell -NoProfile -File tools\test.ps1`. One test shows a widget in the corner of the screen for a few seconds; add `-ExcludeTag Desktop` to skip the tests that run the real widget. GitHub Actions runs the same suite on every push and pull request.
+- Run the tests: install [Pester](https://pester.dev) 5.5 or later once with `Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck`, then run `powershell -NoProfile -File tools\test.ps1`. One test shows a widget in the corner of the screen for a few seconds; add `-ExcludeTag Desktop` to skip the tests that run the real widget. GitHub Actions runs the same suite on every push and pull request.
 - Regenerate the README images from the real widget code: `powershell -NoProfile -File tools\render-screenshots.ps1`. Sample data lives in `tools/samples.json`.
 - Bump `version` in `plugins/opaiva-code-widget/.claude-plugin/plugin.json` for every release. Installed copies stay on the old version until the number changes.
 

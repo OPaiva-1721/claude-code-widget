@@ -153,6 +153,14 @@ Describe 'Get-DoneNotices' {
         @(Get-DoneNotices $queue $cache $maxAge).Count | Should -Be 0
         $stale | Should -Not -Exist
     }
+    It 'forgets cached notices whose file is gone' {
+        $path = New-TestNotice $queue 's1' ($now - 1000)
+        [void](Get-DoneNotices $queue $cache $maxAge)
+        $cache.Count | Should -Be 1
+        Remove-Item -LiteralPath $path
+        @(Get-DoneNotices $queue $cache $maxAge).Count | Should -Be 0
+        $cache.Count | Should -Be 0
+    }
 }
 
 Describe 'Write-LogLine' {

@@ -4,12 +4,15 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   pester:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Pester 5
+      - name: Install Pester
         shell: powershell
         run: Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck
       - name: Run tests (Windows PowerShell 5.1)
