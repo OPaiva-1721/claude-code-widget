@@ -45,11 +45,13 @@ Uso:
 
 Três funções novas no `common.ps1` (usadas só pelo widget; ficam ali porque o `widget.ps1` não pode ser carregado por testes sem abrir a janela):
 
-- `Get-ScreenAreas`: lista a área útil (sem a barra de tarefas) de cada monitor, com `System.Windows.Forms.Screen.AllScreens`. Cada item: `@{ left; top; right; bottom; primary }`. As coordenadas vêm em pixels e são convertidas para as unidades do WPF, divididas por `Screen.PrimaryScreen.Bounds.Width / SystemParameters.PrimaryScreenWidth` (o processo do widget usa a escala do sistema; nesta máquina a razão é 1).
+- `Get-ScreenAreas`: lista a área útil (sem a barra de tarefas) de cada monitor, lida na hora pela API do Windows (`EnumDisplayMonitors` + `GetMonitorInfo`, num tipo C# `ClaudeWidget.Monitors` compilado na primeira chamada). Cada item: `@{ left; top; right; bottom; primary }`. As coordenadas vêm em pixels e são convertidas para as unidades do WPF: divididas pela largura em pixels do monitor principal, dividida por `SystemParameters.PrimaryScreenWidth`. As duas leituras vêm do mesmo processo no mesmo instante, então a razão fica certa com ou sem o modo DPI ativo (nesta máquina, 5120 px / 2560 = 2 com o modo ativo, 1 sem).
+  - Por que não `System.Windows.Forms.Screen`: verificado aqui, ele guarda `Bounds` da primeira leitura (2560 antes do modo DPI ativar, 5120 depois) mas lê `WorkingArea` de novo a cada vez. Os dois podem divergir no mesmo processo.
 - `Get-ScreenKey($Areas)`: texto que identifica a configuração das telas, as áreas concatenadas em ordem. Serve para notar uma mudança.
 - `Resolve-Anchor($Saved, $Areas)`: recebe a posição salva (`@{ right; bottom }` ou `$null`) e as áreas. Devolve `@{ right; bottom; saved }`:
   - Se a posição salva cabe em alguma área, devolve ela (`saved = $true`). "Cabe" usa as mesmas margens de hoje, por área: `left + 120 < right <= areaRight + 1` e `top + 60 < bottom <= areaBottom + 1`.
   - Senão (ou sem posição salva), devolve o canto inferior direito da área principal (`saved = $false`). Sem área marcada como principal, usa a primeira.
+  - Sem nenhuma área (a leitura falhou), devolve `$null`, e o widget mantém a posição atual.
 
 No `widget.ps1`:
 
@@ -71,7 +73,7 @@ O título padrão do VS Code é `[● ]arquivo - pasta[ sufixos] - Visual Studio
 - depois dele: o fim do título ou o separador ` - `, com sufixos opcionais entre eles, como ` (Workspace)`, ` (Espaço de Trabalho)`, ` [WSL: Ubuntu]` ou ` [Administrator]`;
 - sem diferenciar maiúsculas.
 
-Expressão regular, montada com o nome escapado:
+Expressão regular, montada com o nome escapado (`●` é `[char]0x25CF`, colocado na expressão como caractere; o escape `●` não casa no .NET do PowerShell 5.1, verificado aqui):
 
 ```
 (?i)(^|\s-\s)(●\s*)?<projeto>(\s[(\[][^)\]]*[)\]])*(\s-\s|$)
@@ -108,7 +110,7 @@ Limitação aceita: um arquivo aberto sem extensão e com o mesmo nome do projet
 ## Riscos aceitos
 
 - **Escala por monitor:** o widget usa a escala do sistema. Com monitores de escalas diferentes, a conversão de pixels para unidades do WPF pode ficar imprecisa no monitor secundário. O Windows já virtualiza as coordenadas para processos com a escala do sistema; o erro, se houver, é a posição ficar alguns pixels fora, não o widget sumir. Não há como testar aqui (um monitor só).
-- **Mudanças de tela não são testadas de verdade:** não dá para desconectar um monitor nos testes. `Resolve-Anchor` e `Get-ScreenKey` são testados com monitores falsos; a ligação no timer é verificada à mão (abrir o widget com um `state.json` fora de qualquer tela e ver que ele aparece no canto padrão).
+- **Mudanças de tela com o widget aberto não são testadas de verdade:** não dá para desconectar um monitor nos testes. `Resolve-Anchor` e `Get-ScreenKey` são testados com monitores falsos, e a abertura com uma posição fora de qualquer tela é testada com o widget real. A reação no timer fica sem teste automático.
 - **Títulos personalizados:** quem mudar `window.title` ou `window.titleSeparator` no VS Code pode ficar sem o "você já está olhando" quando a sessão não tem janela guardada. Antes, o mesmo usuário tinha falsos positivos. A janela guardada pelo `UserPromptSubmit` continua sendo o caminho principal e não depende do título.
 
 ## Testes e verificação
@@ -116,11 +118,13 @@ Limitação aceita: um arquivo aberto sem extensão e com o mesmo nome do projet
 1. `tools\test.ps1` passa inteiro, com os testes novos:
    - `Write-LogLine`: grava a linha com data e hora; gira ao passar do limite; mantém só um `.old`; não lança erro com um caminho inválido.
    - `Resolve-Anchor`: cabe na principal; cabe na secundária; cai no canto vazio entre monitores de tamanhos diferentes; o monitor sumiu; o monitor voltou; sem posição salva.
-   - `Get-ScreenKey`: muda quando uma área muda. `Get-ScreenAreas`: devolve pelo menos uma área, com exatamente uma principal.
+   - `Get-ScreenKey`: muda quando uma área muda. `Get-ScreenAreas`: devolve pelo menos uma área, com exatamente uma principal, e a área principal bate com `SystemParameters.WorkArea` do WPF.
+   - Widget real (tag Desktop): com um `state.json` fora de qualquer tela, a janela abre no canto inferior direito da área útil da tela principal, e o `state.json` não muda.
+   - `Write-HookLog`: o `hook.log` gira ao passar de 256 KB.
    - `Test-TitleHasProject`: os casos da seção 3, incluindo `widget` contra `claude-code-widget` e contra `widget.ps1 - outro - Visual Studio Code`.
    - `Get-WindowKind`: `Code.exe`, `Code - Insiders.exe`, `WindowsTerminal.exe`, `explorer.exe`.
    - Os ajustes da seção 4.
-2. Verificação à mão no fim: `state.json` com uma posição fora de qualquer tela → o widget abre no canto padrão e o `state.json` não muda.
+2. Verificação à mão no fim: o botão "Ir para o VS Code" de um aviso de "terminou" sem janela guardada traz a janela do projeto certo.
 3. CI verde no GitHub.
 
 ## Fora do escopo
