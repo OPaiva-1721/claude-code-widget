@@ -1,10 +1,10 @@
-# Unit tests for the functions in plugins/claude-code-widget/scripts/hook.ps1. The file is
+# Unit tests for the functions in plugins/opaiva-code-widget/scripts/hook.ps1. The file is
 # dot-sourced: its entry point does not run.
 BeforeAll {
     $savedData = $env:CLAUDE_PLUGIN_DATA
     $tmpData = Join-Path ([IO.Path]::GetTempPath()) ('ccw-unit-' + [guid]::NewGuid().ToString('N'))
     $env:CLAUDE_PLUGIN_DATA = $tmpData
-    . (Join-Path (Split-Path -Parent $PSScriptRoot) 'plugins\claude-code-widget\scripts\hook.ps1')
+    . (Join-Path (Split-Path -Parent $PSScriptRoot) 'plugins\opaiva-code-widget\scripts\hook.ps1')
     $fixtures = Join-Path $PSScriptRoot 'fixtures'
 }
 AfterAll {

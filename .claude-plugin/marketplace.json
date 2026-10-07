@@ -6,8 +6,8 @@
   },
   "plugins": [
     {
-      "name": "claude-code-widget",
-      "source": "./plugins/claude-code-widget",
+      "name": "opaiva-code-widget",
+      "source": "./plugins/opaiva-code-widget",
       "description": "Always-on-top Windows widget: approve permissions, answer Claude's questions and get 'finished' notices without switching to VS Code."
     }
   ]

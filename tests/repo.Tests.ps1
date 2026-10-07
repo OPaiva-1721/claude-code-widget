@@ -3,8 +3,8 @@ BeforeDiscovery {
     $repo = Split-Path -Parent $PSScriptRoot
     $scripts = @(Get-ChildItem -Path (Join-Path $repo 'plugins'), (Join-Path $repo 'tools'), (Join-Path $repo 'tests') -Filter '*.ps1' -File -Recurse |
         ForEach-Object { @{ name = $_.FullName.Substring($repo.Length + 1); path = $_.FullName } })
-    $manifests = @('.claude-plugin\marketplace.json', 'plugins\claude-code-widget\.claude-plugin\plugin.json',
-        'plugins\claude-code-widget\hooks\hooks.json', 'plugins\claude-code-widget\scripts\strings.json') |
+    $manifests = @('.claude-plugin\marketplace.json', 'plugins\opaiva-code-widget\.claude-plugin\plugin.json',
+        'plugins\opaiva-code-widget\hooks\hooks.json', 'plugins\opaiva-code-widget\scripts\strings.json') |
         ForEach-Object { @{ name = $_; path = Join-Path $repo $_ } }
     $workflows = @(Get-ChildItem -Path (Join-Path $repo '.github\workflows') -Filter '*.yml' -File -ErrorAction SilentlyContinue |
         ForEach-Object { @{ name = $_.FullName.Substring($repo.Length + 1); path = $_.FullName } })
@@ -40,9 +40,30 @@ Describe 'repository rules' {
         $offending | Should -BeNullOrEmpty
     }
 
+    # Claude Code 2.1.292+ rejects third-party plugin names that pass as Anthropic's own and warns
+    # about any "claude" in a plugin name. A local CLI may be older and not check, so check here too.
+    It 'marketplace plugin names are not reserved for Anthropic' {
+        $market = [IO.File]::ReadAllText((Join-Path $repo '.claude-plugin\marketplace.json')) | ConvertFrom-Json
+        foreach ($entry in @($market.plugins)) {
+            $entry.name | Should -Not -Match 'claude|anthropic|cc-plugin-'
+        }
+    }
+
+    # A half-done rename (folder, marketplace entry and plugin.json disagreeing) breaks installs
+    It 'each marketplace entry matches its plugin folder and plugin.json name' {
+        $market = [IO.File]::ReadAllText((Join-Path $repo '.claude-plugin\marketplace.json')) | ConvertFrom-Json
+        foreach ($entry in @($market.plugins)) {
+            $manifest = Join-Path (Join-Path $repo $entry.source) '.claude-plugin\plugin.json'
+            $manifest | Should -Exist
+            $plugin = [IO.File]::ReadAllText($manifest) | ConvertFrom-Json
+            $entry.name | Should -BeExactly $plugin.name
+            Split-Path -Leaf $entry.source | Should -BeExactly $plugin.name
+        }
+    }
+
     # Installed copies only update when the version number changes
     It 'plugin.json version matches the latest CHANGELOG entry' {
-        $plugin = [IO.File]::ReadAllText((Join-Path $repo 'plugins\claude-code-widget\.claude-plugin\plugin.json')) | ConvertFrom-Json
+        $plugin = [IO.File]::ReadAllText((Join-Path $repo 'plugins\opaiva-code-widget\.claude-plugin\plugin.json')) | ConvertFrom-Json
         $latest = Select-String -LiteralPath (Join-Path $repo 'CHANGELOG.md') -Pattern '^## (\d+\.\d+\.\d+)' | Select-Object -First 1
         $latest | Should -Not -BeNullOrEmpty
         $latest.Matches[0].Groups[1].Value | Should -Be $plugin.version

@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-widget",
+  "name": "opaiva-code-widget",
   "displayName": "Claude Code Widget",
   "version": "1.1.1",
   "description": "Always-on-top Windows widget for Claude Code: approve permission requests, answer Claude's questions and get 'finished' notices without switching back to VS Code.",

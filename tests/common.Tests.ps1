@@ -1,6 +1,6 @@
-# Unit tests for plugins/claude-code-widget/scripts/common.ps1
+# Unit tests for plugins/opaiva-code-widget/scripts/common.ps1
 BeforeAll {
-    . (Join-Path (Split-Path -Parent $PSScriptRoot) 'plugins\claude-code-widget\scripts\common.ps1')
+    . (Join-Path (Split-Path -Parent $PSScriptRoot) 'plugins\opaiva-code-widget\scripts\common.ps1')
 }
 
 Describe 'Get-MutexName' {

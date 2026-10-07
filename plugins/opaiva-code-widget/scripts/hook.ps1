@@ -1,4 +1,4 @@
-# claude-code-widget: Claude Code hook (Windows PowerShell 5.1).
+# opaiva-code-widget: Claude Code hook (Windows PowerShell 5.1).
 # One script for every event; Invoke-Hook routes on hook_event_name:
 #   PermissionRequest            -> queue\req-<id>.json (kind=permission), waits for queue\res-<id>.json,
 #                                   prints allow/deny.
@@ -24,7 +24,7 @@ $Utf8 = New-Object System.Text.UTF8Encoding $false
 
 $WidgetScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'widget.ps1'))
 # Plugin data dir survives plugin updates; fallback for running the scripts outside a plugin
-$Data = if ($env:CLAUDE_PLUGIN_DATA) { $env:CLAUDE_PLUGIN_DATA } else { Join-Path $env:USERPROFILE '.claude\claude-code-widget' }
+$Data = if ($env:CLAUDE_PLUGIN_DATA) { $env:CLAUDE_PLUGIN_DATA } else { Join-Path $env:USERPROFILE '.claude\opaiva-code-widget' }
 $Data = [IO.Path]::GetFullPath($Data).TrimEnd('\')
 $Queue = Join-Path $Data 'queue'
 $Sessions = Join-Path $Data 'sessions'

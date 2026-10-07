@@ -3,7 +3,7 @@
 # Run after changing the widget's look:  powershell -NoProfile -File tools\render-screenshots.ps1
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$widget = Join-Path $repo 'plugins\claude-code-widget\scripts\widget.ps1'
+$widget = Join-Path $repo 'plugins\opaiva-code-widget\scripts\widget.ps1'
 $samples = Join-Path $PSScriptRoot 'samples.json'
 foreach ($lang in 'en', 'pt') {
     $out = Join-Path $repo "docs\images\$lang"

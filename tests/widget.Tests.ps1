@@ -3,7 +3,7 @@
 #   the queue test starts a real widget for a few seconds (an idle pill appears in a corner).
 BeforeAll {
     $repo = Split-Path -Parent $PSScriptRoot
-    $widget = Join-Path $repo 'plugins\claude-code-widget\scripts\widget.ps1'
+    $widget = Join-Path $repo 'plugins\opaiva-code-widget\scripts\widget.ps1'
     $samples = Join-Path $repo 'tools\samples.json'
 }
 
