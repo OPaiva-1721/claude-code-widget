@@ -68,21 +68,21 @@ Ao ser carregado, só define funções: não cria pastas, não lê arquivos e n�
   - `Get-PermissionDetail $ToolInput`: prioridade `command` → `file_path` → `notebook_path` → `url` → `query` → JSON compacto (profundidade 4). Corta em 2000 caracteres + `' ...'`.
   - `New-PermissionOutput [string]$Behavior, [string]$Message`: devolve o objeto ordenado `hookSpecificOutput` do `PermissionRequest`. O `message` só entra quando `Behavior = 'deny'`.
   - `New-AnswerOutput $ToolInput, $Answers, [string]$Reason`: devolve o objeto do `PreToolUse`, com `permissionDecision = 'allow'` e `updatedInput` = a entrada original + `answers`.
-- **`Invoke-Hook $Event`**: contém o roteamento que hoje fica nas linhas 297–419. Devolve **a string JSON a imprimir, ou `$null`**. Não chama `exit`. As funções que hoje leem `$evt`/`$logTag` do escopo do script passam a receber esses valores por parâmetro.
+- **`Invoke-Hook $evt`** (não `$Event`, que é variável automática do PowerShell): contém o roteamento que hoje fica nas linhas 297–419. Devolve **a string JSON a imprimir, ou `$null`**. Não chama `exit`. As funções que hoje leem `$evt`/`$logTag` do escopo do script passam a receber esses valores por parâmetro.
 - O ponto de entrada fica no fim do arquivo:
 
   ```powershell
-  if ($MyInvocation.InvocationName -ne '.') {
-      if ($EnsureWidget) { [void](Start-Widget); exit 0 }
-      [Console]::InputEncoding = [Text.Encoding]::UTF8
-      try { $evt = [Console]::In.ReadToEnd() | ConvertFrom-Json } catch { exit 0 }
-      $out = Invoke-Hook $evt
-      if ($out) { $out }
-      exit 0
-  }
+  # Loaded with dot-source (tests): stop here, only the functions above are wanted
+  if ($MyInvocation.InvocationName -eq '.') { return }
+  if ($EnsureWidget) { [void](Start-Widget); exit 0 }
+  [Console]::InputEncoding = [Text.Encoding]::UTF8
+  try { $evt = [Console]::In.ReadToEnd() | ConvertFrom-Json } catch { exit 0 }
+  $out = Invoke-Hook $evt
+  if ($out) { $out }
+  exit 0
   ```
 
-  Carregado com dot-source (nos testes), o arquivo só define funções e variáveis.
+  Carregado com dot-source (nos testes), o `return` para o script depois das definições, sem derrubar quem o carregou. Isso foi verificado no PowerShell 5.1.
 
 ### `widget.ps1`
 
@@ -133,7 +133,8 @@ O `cwd` dos eventos é uma pasta temporária com nome único (`ccw-e2e-<guid>`),
 
 ### `widget.Tests.ps1`
 - Para `en` e `pt`: `widget.ps1 -RenderSamples tools/samples.json -OutDir <temp> -Lang <x>` termina com código 0 e gera `idle.png`, `permission.png`, `question.png` e `done.png`, todos maiores que 1 KB.
-- **Fallback:** se a renderização WPF falhar no runner do GitHub sem sessão de desktop, esses testes recebem a tag `Desktop` e o CI os exclui. Localmente eles continuam rodando.
+- Widget real: abre o `widget.ps1` com uma pasta de dados temporária que contém um pedido órfão e um aviso vencido, e confere que os dois somem e que o `widget.log` não registrou erro. Isso prova que o loop do widget usa as funções de fila do `common.ps1` corretamente.
+- Esses testes têm a tag `Desktop`. Se a renderização WPF falhar no runner do GitHub, que não tem sessão de desktop, o workflow passa a chamar `tools\test.ps1 -CI -ExcludeTag Desktop`. Localmente eles continuam rodando.
 
 ### `repo.Tests.ps1`
 - Todo `.ps1` em `plugins/` e `tools/` tem só bytes < 0x80.
@@ -146,9 +147,11 @@ O que depende de interação real com o Windows continua sendo testado à mão: 
 ## Execução
 
 ### `tools/test.ps1`
-- Parâmetro `-CI` (switch).
+- Parâmetros: `-CI` (switch) e `-ExcludeTag` (string[]).
 - Se não houver Pester ≥ 5.5, para com a mensagem: `Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck`.
-- Roda `Invoke-Pester` em `tests/` com `Output.Verbosity = Detailed`. Com `-CI`, também usa `Run.Exit = $true`, `TestResult` em NUnitXml (`testResults.xml`) e `Filter.ExcludeTag = 'Desktop'`, se essa tag existir.
+- Roda `Invoke-Pester` em `tests/` com `Output.Verbosity = Detailed` e `Run.Exit = $true` sempre, para o código de saída refletir as falhas também localmente.
+- `-CI` acrescenta `TestResult` em NUnitXml (`testResults.xml`, ignorado pelo git).
+- `-ExcludeTag` repassa as tags para `Filter.ExcludeTag`. Os testes de renderização têm a tag `Desktop`; o CI só os exclui se a renderização WPF falhar no runner.
 - Uso local: `powershell -NoProfile -File tools\test.ps1`.
 
 ### `.github/workflows/test.yml`
