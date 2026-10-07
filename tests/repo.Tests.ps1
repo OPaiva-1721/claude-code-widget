@@ -8,6 +8,7 @@ BeforeDiscovery {
         ForEach-Object { @{ name = $_; path = Join-Path $repo $_ } }
     $workflows = @(Get-ChildItem -Path (Join-Path $repo '.github\workflows') -Filter '*.yml' -File -ErrorAction SilentlyContinue |
         ForEach-Object { @{ name = $_.FullName.Substring($repo.Length + 1); path = $_.FullName } })
+    $readmes = @('README.md', 'README.pt-BR.md') | ForEach-Object { @{ name = $_; path = Join-Path $repo $_ } }
 }
 
 Describe 'repository rules' {
@@ -59,6 +60,25 @@ Describe 'repository rules' {
             $entry.name | Should -BeExactly $plugin.name
             Split-Path -Leaf $entry.source | Should -BeExactly $plugin.name
         }
+    }
+
+    # After the rename the old plugin id only belongs in the migration steps ("2.0.0" section), and
+    # there the old plugin is uninstalled before the new one is installed (both at once = two widgets)
+    It '<name> uses the old plugin id only in the 2.0.0 section, uninstalling first' -ForEach $readmes {
+        $section = ''
+        $outside = @()
+        $migration = New-Object System.Collections.ArrayList
+        foreach ($line in [IO.File]::ReadAllLines($path, [Text.Encoding]::UTF8)) {
+            if ($line -match '^#{2,3} (.+)$') { $section = $Matches[1] }
+            if ($section -match '2\.0\.0') { [void]$migration.Add($line) }
+            elseif ($line -match 'claude-code-widget@claude-code-widget') { $outside += $line }
+        }
+        $outside | Should -BeNullOrEmpty
+        $text = $migration -join "`n"
+        $uninstall = $text.IndexOf('claude plugin uninstall claude-code-widget@claude-code-widget')
+        $install = $text.IndexOf('claude plugin install opaiva-code-widget@claude-code-widget')
+        $uninstall | Should -BeGreaterOrEqual 0
+        $install | Should -BeGreaterThan $uninstall
     }
 
     # Installed copies only update when the version number changes

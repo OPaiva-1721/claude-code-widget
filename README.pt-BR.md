@@ -36,10 +36,10 @@ Num terminal:
 
 ```powershell
 claude plugin marketplace add OPaiva-1721/claude-code-widget
-claude plugin install claude-code-widget@claude-code-widget
+claude plugin install opaiva-code-widget@claude-code-widget
 ```
 
-Também dá para rodar os mesmos comandos dentro do Claude Code: `/plugin marketplace add OPaiva-1721/claude-code-widget` e depois `/plugin install claude-code-widget@claude-code-widget`.
+Também dá para rodar os mesmos comandos dentro do Claude Code: `/plugin marketplace add OPaiva-1721/claude-code-widget` e depois `/plugin install opaiva-code-widget@claude-code-widget`.
 
 Depois, abra uma sessão nova do Claude Code ou rode `/reload-plugins`. O widget abre sozinho junto com a primeira sessão.
 
@@ -47,10 +47,32 @@ Depois, abra uma sessão nova do Claude Code ou rode `/reload-plugins`. O widget
 
 ```powershell
 claude plugin marketplace update claude-code-widget
-claude plugin update claude-code-widget@claude-code-widget
+claude plugin update opaiva-code-widget@claude-code-widget
 ```
 
 Depois, abra uma sessão nova do Claude Code. O widget reinicia sozinho com a versão nova. O que mudou em cada versão está no [changelog](CHANGELOG.md), em inglês.
+
+### Renomeado na 2.0.0
+
+Até a versão 1.1.1 o plugin se chamava `claude-code-widget`. O Claude Code agora reserva os nomes de plugin que começam com `claude-` para os plugins da própria Anthropic, então a partir da 2.0.0 ele se chama `opaiva-code-widget`. O marketplace continua com o mesmo nome. Se você tem o plugin antigo, o `plugin update` não encontra mais versões novas. Faça a troca uma vez:
+
+1. **Desinstale o plugin antigo primeiro.** Com os dois instalados, cada pedido aparece em dois widgets.
+
+   ```powershell
+   claude plugin uninstall claude-code-widget@claude-code-widget
+   ```
+
+2. Feche o widget antigo: **botão direito → Fechar widget**.
+3. Instale o novo:
+
+   ```powershell
+   claude plugin marketplace update claude-code-widget
+   claude plugin install opaiva-code-widget@claude-code-widget
+   ```
+
+4. Abra uma sessão nova do Claude Code ou rode `/reload-plugins`.
+
+O widget volta a abrir no canto padrão, porque o nome novo vem com uma pasta de dados nova.
 
 ## Como usar
 
@@ -100,7 +122,7 @@ Claude Code ──hook──▶ hook.ps1 ──queue\req-<id>.json──▶ widg
 - O `hook.ps1` roda em cinco eventos de hook. No `PermissionRequest` e no `PreToolUse` do `AskUserQuestion`, ele grava um arquivo de pedido e espera a resposta do widget. Depois devolve a decisão no formato de hook do Claude Code. No `Stop` ele grava o aviso de "terminou", e no `UserPromptSubmit` apaga esse aviso. No `UserPromptSubmit` ele também guarda a janela que está na frente, mas só se a árvore de processos mostrar que ela é daquela sessão do Claude Code. Um prompt enviado pelo celular deixa outra janela qualquer na frente, então ele é ignorado. No `SessionStart` ele só garante que o widget está aberto.
 - O `widget.ps1` é um único processo que fica rodando, um por usuário. Ele é aberto fora da árvore de processos do Claude Code, então continua aberto quando a sessão acaba. Ele verifica a pasta da fila e mostra primeiro o item mais antigo.
 - O `common.ps1` reúne o que os dois scripts compartilham: o nome do mutex do widget, a gravação atômica de JSON, o idioma da interface e a leitura da fila.
-- Os arquivos ficam na pasta de dados do plugin, `%USERPROFILE%\.claude\plugins\data\claude-code-widget-claude-code-widget\`: a fila, a janela de cada sessão (`sessions\`), a posição do widget (`state.json`) e os logs (`hook.log`, `widget.log`).
+- Os arquivos ficam na pasta de dados do plugin, `%USERPROFILE%\.claude\plugins\data\opaiva-code-widget-claude-code-widget\`: a fila, a janela de cada sessão (`sessions\`), a posição do widget (`state.json`) e os logs (`hook.log`, `widget.log`).
 
 ## Segurança
 
@@ -118,17 +140,17 @@ Claude Code ──hook──▶ hook.ps1 ──queue\req-<id>.json──▶ widg
 ## Desinstalar
 
 ```powershell
-claude plugin uninstall claude-code-widget@claude-code-widget
+claude plugin uninstall opaiva-code-widget@claude-code-widget
 ```
 
 O widget aberto não fica sabendo que o plugin foi removido. Feche com **botão direito → Fechar widget**, ou saia da sua conta do Windows.
 
 ## Desenvolvimento
 
-- Validar o plugin e o marketplace: `claude plugin validate .` e `claude plugin validate plugins/claude-code-widget`.
+- Validar o plugin e o marketplace: `claude plugin validate .` e `claude plugin validate plugins/opaiva-code-widget`.
 - Rodar os testes: instale o [Pester 5](https://pester.dev) uma vez com `Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck` e depois rode `powershell -NoProfile -File tools\test.ps1`. Um dos testes mostra um widget no canto da tela por alguns segundos; use `-ExcludeTag Desktop` para pular os testes que abrem o widget de verdade. O GitHub Actions roda a mesma suíte a cada push e pull request.
 - Gerar de novo as imagens do README a partir do código real do widget: `powershell -NoProfile -File tools\render-screenshots.ps1`. Os dados de exemplo ficam em `tools/samples.json`.
-- Aumente o `version` em `plugins/claude-code-widget/.claude-plugin/plugin.json` a cada versão nova. Quem já instalou fica na versão antiga até o número mudar.
+- Aumente o `version` em `plugins/opaiva-code-widget/.claude-plugin/plugin.json` a cada versão nova. Quem já instalou fica na versão antiga até o número mudar.
 
 ## Licença
 
