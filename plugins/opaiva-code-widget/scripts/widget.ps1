@@ -330,25 +330,32 @@ namespace ClaudeWidget {
     $ui.BtnDismiss.Content = $S.ok
 
     # --- Position: anchored by the bottom-right corner, so the card grows up/left ---
+    # $script:savedAnchor is where you last dragged it (state.json). While that spot is on no screen
+    # (its monitor was unplugged), the widget uses the main screen's corner, and it goes back to the
+    # saved spot once that screen is back: only dragging writes state.json.
+    $script:savedAnchor = $null
+    try {
+        if (Test-Path -LiteralPath $StatePath) { $script:savedAnchor = [IO.File]::ReadAllText($StatePath, $Utf8) | ConvertFrom-Json }
+    } catch {}
     $wa = [System.Windows.SystemParameters]::WorkArea
     $script:anchorRight = $wa.Right
     $script:anchorBottom = $wa.Bottom
-    try {
-        if (Test-Path -LiteralPath $StatePath) {
-            $st = [IO.File]::ReadAllText($StatePath, $Utf8) | ConvertFrom-Json
-            $vl = [System.Windows.SystemParameters]::VirtualScreenLeft
-            $vt = [System.Windows.SystemParameters]::VirtualScreenTop
-            $vr = $vl + [System.Windows.SystemParameters]::VirtualScreenWidth
-            $vb = $vt + [System.Windows.SystemParameters]::VirtualScreenHeight
-            $sr = [double]$st.right
-            $sb = [double]$st.bottom
-            # Only reuse it if it still fits on screen (a monitor may have been unplugged)
-            if ($sr -gt $vl + 120 -and $sr -le $vr + 1 -and $sb -gt $vt + 60 -and $sb -le $vb + 1) {
-                $script:anchorRight = $sr
-                $script:anchorBottom = $sb
-            }
+    $script:screenKey = $null
+    # Re-resolves the anchor if the screens changed since the last call. Returns the new anchor
+    # (@{ right; bottom; saved }), or $null when nothing changed.
+    function Sync-Anchor {
+        $areas = @(Get-ScreenAreas)
+        $key = Get-ScreenKey $areas
+        if ($key -eq $script:screenKey) { return $null }
+        $script:screenKey = $key
+        $a = Resolve-Anchor $script:savedAnchor $areas
+        if ($a) {
+            $script:anchorRight = $a.right
+            $script:anchorBottom = $a.bottom
         }
-    } catch {}
+        return $a
+    }
+    try { [void](Sync-Anchor) } catch { Write-Log $_ }
 
     function Update-Position {
         $win.Left = [math]::Max([System.Windows.SystemParameters]::VirtualScreenLeft, $script:anchorRight - $win.ActualWidth)
@@ -366,13 +373,15 @@ namespace ClaudeWidget {
     })
 
     $win.Add_MouseLeftButtonDown({
+        $left = $win.Left
+        $top = $win.Top
         try { $win.DragMove() } catch {}
+        # A click without a move keeps the saved spot (its monitor may be unplugged right now)
+        if ($win.Left -eq $left -and $win.Top -eq $top) { return }
         $script:anchorRight = $win.Left + $win.ActualWidth
         $script:anchorBottom = $win.Top + $win.ActualHeight
-        try {
-            $state = @{ right = $script:anchorRight; bottom = $script:anchorBottom } | ConvertTo-Json -Compress
-            [IO.File]::WriteAllText($StatePath, $state, $Utf8)
-        } catch {}
+        $script:savedAnchor = @{ right = $script:anchorRight; bottom = $script:anchorBottom }
+        try { [IO.File]::WriteAllText($StatePath, ($script:savedAnchor | ConvertTo-Json -Compress), $Utf8) } catch {}
     })
 
     # --- State ---
@@ -888,7 +897,21 @@ namespace ClaudeWidget {
 
     $timer = New-Object System.Windows.Threading.DispatcherTimer
     $timer.Interval = [TimeSpan]::FromMilliseconds(400)
-    $timer.Add_Tick({ try { Update-View } catch { Write-Log $_ } })
+    $script:ticks = 0
+    $timer.Add_Tick({
+        try { Update-View } catch { Write-Log $_ }
+        # Every ~2 s: a monitor unplugged or back, a resolution change, the taskbar moved
+        $script:ticks++
+        if ($script:ticks % 5 -eq 0) {
+            try {
+                $a = Sync-Anchor
+                if ($a) {
+                    Update-Position
+                    Write-Log ('screens changed: anchor {0},{1} ({2})' -f [int]$a.right, [int]$a.bottom, $(if ($a.saved) { 'saved' } else { 'default' }))
+                }
+            } catch { Write-Log $_ }
+        }
+    })
     $win.Add_Closed({ $timer.Stop() })
     $timer.Start()
 

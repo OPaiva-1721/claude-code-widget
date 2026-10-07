@@ -226,3 +226,93 @@ Describe 'Test-TitleHasProject' {
         Test-TitleHasProject 'x.ps1 - widget - Visual Studio Code' '' | Should -BeFalse
     }
 }
+
+Describe 'Get-ScreenAreas' {
+    It 'lists at least one screen, exactly one of them the main one' {
+        $areas = @(Get-ScreenAreas)
+        $areas.Count | Should -BeGreaterThan 0
+        @($areas | Where-Object { $_.primary }).Count | Should -Be 1
+        foreach ($a in $areas) {
+            $a.right | Should -BeGreaterThan $a.left
+            $a.bottom | Should -BeGreaterThan $a.top
+        }
+    }
+    It 'uses the same units as WPF' {
+        $main = @(Get-ScreenAreas | Where-Object { $_.primary })[0]
+        $wa = [System.Windows.SystemParameters]::WorkArea
+        [math]::Abs($main.right - $wa.Right) | Should -BeLessOrEqual 1
+        [math]::Abs($main.bottom - $wa.Bottom) | Should -BeLessOrEqual 1
+    }
+}
+
+Describe 'Get-ScreenKey' {
+    BeforeAll { $main = @{ left = 0; top = 0; right = 2560; bottom = 1400; primary = $true } }
+    It 'is the same for the same screens' {
+        Get-ScreenKey @($main) | Should -BeExactly (Get-ScreenKey @($main.Clone()))
+    }
+    It 'changes when a screen changes' {
+        $moved = $main.Clone()
+        $moved.bottom = 1440
+        Get-ScreenKey @($moved) | Should -Not -BeExactly (Get-ScreenKey @($main))
+    }
+}
+
+Describe 'Resolve-Anchor' {
+    BeforeAll {
+        # Main screen 2560 x 1440 with a 40-pixel taskbar; a smaller screen on its left, bottom-aligned
+        $main = @{ left = 0; top = 0; right = 2560; bottom = 1400; primary = $true }
+        $side = @{ left = -1920; top = 360; right = 0; bottom = 1400; primary = $false }
+    }
+    It 'keeps a saved spot on the main screen' {
+        $a = Resolve-Anchor @{ right = 2000; bottom = 900 } @($main, $side)
+        $a.right | Should -Be 2000
+        $a.bottom | Should -Be 900
+        $a.saved | Should -BeTrue
+    }
+    It 'keeps a saved spot on another screen' {
+        $a = Resolve-Anchor @{ right = -300; bottom = 1200 } @($main, $side)
+        $a.right | Should -Be -300
+        $a.saved | Should -BeTrue
+    }
+    It 'moves a spot between screens of different sizes to the main corner' {
+        # Above the smaller screen: inside the box around both screens, but on neither of them
+        $a = Resolve-Anchor @{ right = -300; bottom = 200 } @($main, $side)
+        $a.right | Should -Be 2560
+        $a.bottom | Should -Be 1400
+        $a.saved | Should -BeFalse
+    }
+    It 'moves to the main corner when the saved screen is gone' {
+        $a = Resolve-Anchor @{ right = -300; bottom = 1200 } @($main)
+        $a.right | Should -Be 2560
+        $a.saved | Should -BeFalse
+    }
+    It 'goes back to the saved spot when its screen is back' {
+        $saved = @{ right = -300; bottom = 1200 }
+        (Resolve-Anchor $saved @($main)).saved | Should -BeFalse
+        $back = Resolve-Anchor $saved @($main, $side)
+        $back.right | Should -Be -300
+        $back.saved | Should -BeTrue
+    }
+    It 'uses the main corner without a saved spot' {
+        $a = Resolve-Anchor $null @($side, $main)
+        $a.right | Should -Be 2560
+        $a.bottom | Should -Be 1400
+    }
+    It 'uses the main corner when the saved spot lacks fields' {
+        $a = Resolve-Anchor ('{"x":5}' | ConvertFrom-Json) @($main)
+        $a.right | Should -Be 2560
+        $a.saved | Should -BeFalse
+    }
+    It 'reads a saved spot as loaded from state.json' {
+        $a = Resolve-Anchor ('{"right":2371.09,"bottom":878.6}' | ConvertFrom-Json) @($main)
+        $a.right | Should -Be 2371.09
+        $a.saved | Should -BeTrue
+    }
+    It 'uses the first screen when none is marked main' {
+        $a = Resolve-Anchor $null @(@{ left = 0; top = 0; right = 1920; bottom = 1040; primary = $false })
+        $a.right | Should -Be 1920
+    }
+    It 'returns nothing without screens' {
+        Resolve-Anchor @{ right = 2000; bottom = 900 } @() | Should -BeNullOrEmpty
+    }
+}
