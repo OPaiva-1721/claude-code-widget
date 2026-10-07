@@ -8,11 +8,24 @@ BeforeDiscovery {
         ForEach-Object { @{ name = $_; path = Join-Path $repo $_ } }
     $workflows = @(Get-ChildItem -Path (Join-Path $repo '.github\workflows') -Filter '*.yml' -File -ErrorAction SilentlyContinue |
         ForEach-Object { @{ name = $_.FullName.Substring($repo.Length + 1); path = $_.FullName } })
-    $readmes = @('README.md', 'README.pt-BR.md') | ForEach-Object { @{ name = $_; path = Join-Path $repo $_ } }
+    $readmes = @(
+        @{ name = 'README.md'; path = Join-Path $repo 'README.md'; updateHeading = 'Update'; anchor = '#renamed-in-200' }
+        @{ name = 'README.pt-BR.md'; path = Join-Path $repo 'README.pt-BR.md'; updateHeading = 'Atualizar'; anchor = '#renomeado-na-200' }
+    )
 }
 
 Describe 'repository rules' {
-    BeforeAll { $repo = Split-Path -Parent $PSScriptRoot }
+    BeforeAll {
+        $repo = Split-Path -Parent $PSScriptRoot
+        # Lines of a markdown file under the ##/### headings whose title matches $Heading
+        function Get-MarkdownSection([string]$Path, [string]$Heading) {
+            $section = ''
+            foreach ($line in [IO.File]::ReadAllLines($Path, [Text.Encoding]::UTF8)) {
+                if ($line -match '^#{2,3} (.+)$') { $section = $Matches[1] }
+                if ($section -match $Heading) { $line }
+            }
+        }
+    }
 
     # Windows PowerShell 5.1 reads BOM-less files as ANSI: any non-ASCII byte turns into garbage
     It '<name> is ASCII-only' -ForEach $scripts {
@@ -79,6 +92,29 @@ Describe 'repository rules' {
         $install = $text.IndexOf('claude plugin install opaiva-code-widget@claude-code-widget')
         $uninstall | Should -BeGreaterOrEqual 0
         $install | Should -BeGreaterThan $uninstall
+    }
+
+    # On 1.1.1, the usual Update commands make the old plugin stop loading (it is no longer in the
+    # marketplace): the Update section must send those users to the migration steps
+    It '<name> points from the Update section to the migration steps' -ForEach $readmes {
+        (@(Get-MarkdownSection $path "^$updateHeading$") -join "`n") | Should -Match ([regex]::Escape("]($anchor)"))
+    }
+
+    # Sessions that are still open keep the old hooks and reopen the old widget on their next request:
+    # the migration reloads them before the new plugin is installed
+    It '<name> reloads open sessions before installing the new plugin' -ForEach $readmes {
+        $text = @(Get-MarkdownSection $path '2\.0\.0') -join "`n"
+        $reload = $text.IndexOf('/reload-plugins')
+        $install = $text.IndexOf('claude plugin install opaiva-code-widget@claude-code-widget')
+        $reload | Should -BeGreaterOrEqual 0
+        $reload | Should -BeLessThan $install
+    }
+
+    # Claude Code follows "renames" when an installed plugin is missing from the marketplace and moves
+    # the user's settings to the new name: the 1.1.1 name must keep pointing at the current plugin
+    It 'marketplace maps the 1.1.1 plugin name to the current one' {
+        $market = [IO.File]::ReadAllText((Join-Path $repo '.claude-plugin\marketplace.json')) | ConvertFrom-Json
+        $market.renames.'claude-code-widget' | Should -BeExactly @($market.plugins)[0].name
     }
 
     # Installed copies only update when the version number changes

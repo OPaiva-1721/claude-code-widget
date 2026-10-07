@@ -45,6 +45,8 @@ Depois, abra uma sessão nova do Claude Code ou rode `/reload-plugins`. O widget
 
 ### Atualizar
 
+Vindo da versão 1.1.1 ou anterior? Siga [Renomeado na 2.0.0](#renomeado-na-200) em vez disto.
+
 ```powershell
 claude plugin marketplace update claude-code-widget
 claude plugin update opaiva-code-widget@claude-code-widget
@@ -54,15 +56,15 @@ Depois, abra uma sessão nova do Claude Code. O widget reinicia sozinho com a ve
 
 ### Renomeado na 2.0.0
 
-Até a versão 1.1.1 o plugin se chamava `claude-code-widget`. O Claude Code agora reserva os nomes de plugin que começam com `claude-` para os plugins da própria Anthropic, então a partir da 2.0.0 ele se chama `opaiva-code-widget`. O marketplace continua com o mesmo nome. Se você tem o plugin antigo, o `plugin update` não encontra mais versões novas. Faça a troca uma vez:
+Até a versão 1.1.1 o plugin se chamava `claude-code-widget`. O Claude Code agora reserva os nomes de plugin que começam com `claude-` para os plugins da própria Anthropic, então a partir da 2.0.0 ele se chama `opaiva-code-widget`. O marketplace continua com o mesmo nome e avisa o Claude Code sobre o nome novo: depois que o marketplace é atualizado, o plugin antigo deixa de carregar e o Claude Code passa as suas configurações para o nome novo. Faça a troca uma vez à mão, para o plugin novo ficar instalado e o widget antigo sumir:
 
-1. **Desinstale o plugin antigo primeiro.** Com os dois instalados, cada pedido aparece em dois widgets.
+1. **Desinstale o plugin antigo primeiro.** Com os dois instalados, cada pedido aparece em dois widgets. Se ele disser que o plugin não está instalado, o Claude Code já fez a troca: é só continuar.
 
    ```powershell
    claude plugin uninstall claude-code-widget@claude-code-widget
    ```
 
-2. Feche o widget antigo: **botão direito → Fechar widget**.
+2. Rode `/reload-plugins` em todas as sessões do Claude Code que ainda estão abertas, ou feche essas sessões. Sessões abertas continuam com os hooks antigos e abririam o widget antigo de novo. Depois feche o widget antigo: **botão direito → Fechar widget**.
 3. Instale o novo:
 
    ```powershell

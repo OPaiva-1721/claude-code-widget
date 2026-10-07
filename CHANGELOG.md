@@ -2,7 +2,7 @@
 
 ## 2.0.0 (2026-10-07)
 
-- **Renamed to `opaiva-code-widget`.** Claude Code 2.1.292 and later reserve plugin names that start with `claude-` for Anthropic's own plugins. Install with `claude plugin install opaiva-code-widget@claude-code-widget`; the marketplace keeps its name. If you have the old `claude-code-widget` plugin, follow [Renamed in 2.0.0](README.md#renamed-in-200) and uninstall it first. After the switch the widget starts in the default corner.
+- **Renamed to `opaiva-code-widget`.** Claude Code 2.1.292 and later reserve plugin names that start with `claude-` for Anthropic's own plugins. Install with `claude plugin install opaiva-code-widget@claude-code-widget`. The marketplace keeps its name and maps the old name to the new one, so once it is updated the old plugin stops loading and Claude Code moves your settings to the new name. If you have the old `claude-code-widget` plugin, follow [Renamed in 2.0.0](README.md#renamed-in-200): uninstall it first, and reload any open sessions. After the switch the widget starts in the default corner.
 
 ## 1.1.1 (2026-10-07)
 

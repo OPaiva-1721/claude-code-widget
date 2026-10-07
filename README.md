@@ -45,6 +45,8 @@ Then start a new Claude Code session, or run `/reload-plugins`. The widget opens
 
 ### Update
 
+Coming from version 1.1.1 or earlier? Follow [Renamed in 2.0.0](#renamed-in-200) instead.
+
 ```powershell
 claude plugin marketplace update claude-code-widget
 claude plugin update opaiva-code-widget@claude-code-widget
@@ -54,15 +56,15 @@ Then start a new Claude Code session. The widget restarts with the new version o
 
 ### Renamed in 2.0.0
 
-Up to version 1.1.1 the plugin was called `claude-code-widget`. Claude Code now reserves plugin names that start with `claude-` for Anthropic's own plugins, so from 2.0.0 on it is `opaiva-code-widget`. The marketplace keeps its name. If you have the old plugin, `plugin update` no longer finds new versions. Switch once:
+Up to version 1.1.1 the plugin was called `claude-code-widget`. Claude Code now reserves plugin names that start with `claude-` for Anthropic's own plugins, so from 2.0.0 on it is `opaiva-code-widget`. The marketplace keeps its name and tells Claude Code about the new one: once the marketplace is updated, the old plugin no longer loads, and Claude Code moves your settings to the new name. Switch once by hand so the new plugin is installed and the old widget is gone:
 
-1. **Uninstall the old plugin first.** With both installed, every request shows up in two widgets.
+1. **Uninstall the old plugin first.** With both installed, every request shows up in two widgets. If it says the plugin is not installed, Claude Code already moved it: just continue.
 
    ```powershell
    claude plugin uninstall claude-code-widget@claude-code-widget
    ```
 
-2. Close the old widget: **right-click → Close widget**.
+2. Run `/reload-plugins` in every Claude Code session that is still open, or close them. Open sessions keep the old hooks and would open the old widget again. Then close the old widget: **right-click → Close widget**.
 3. Install the new one:
 
    ```powershell

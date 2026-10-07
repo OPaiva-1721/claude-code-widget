@@ -4,6 +4,9 @@
   "owner": {
     "name": "Gabryel Paiva Neves"
   },
+  "renames": {
+    "claude-code-widget": "opaiva-code-widget"
+  },
   "plugins": [
     {
       "name": "opaiva-code-widget",

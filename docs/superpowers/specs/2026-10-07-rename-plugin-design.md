@@ -19,7 +19,7 @@ A instalação ainda funciona: isso foi verificado com o 2.1.292 numa configura�
 | Repositório no GitHub | continua `OPaiva-1721/claude-code-widget` |
 | Comando de instalação | `claude plugin install opaiva-code-widget@claude-code-widget` |
 | `displayName` e título dos READMEs | continuam "Claude Code Widget" |
-| Migração de quem já instalou | só um aviso no README. Sem cópia automática de `state.json` ou `sessions\` |
+| Migração de quem já instalou | aviso no README + campo nativo `renames` no `marketplace.json` (`claude-code-widget` → `opaiva-code-widget`; decidido depois da revisão final). Sem cópia automática de `state.json` ou `sessions\` |
 | Versão | 2.0.0, porque o comando de instalação muda |
 
 Verificado com o Claude Code 2.1.292 em marketplaces descartáveis:
@@ -32,7 +32,7 @@ Verificado com o Claude Code 2.1.292 em marketplaces descartáveis:
 
 1. **Pasta do plugin:** `plugins/claude-code-widget/` → `plugins/opaiva-code-widget/` via `git mv`, para manter o histórico dos arquivos.
 2. **`plugins/opaiva-code-widget/.claude-plugin/plugin.json`:** `name` = `opaiva-code-widget`; `version` = `2.0.0`. Os demais campos ficam iguais.
-3. **`.claude-plugin/marketplace.json`:** `plugins[0].name` = `opaiva-code-widget`; `plugins[0].source` = `./plugins/opaiva-code-widget`. O `name` do marketplace continua `claude-code-widget`.
+3. **`.claude-plugin/marketplace.json`:** `plugins[0].name` = `opaiva-code-widget`; `plugins[0].source` = `./plugins/opaiva-code-widget`. O `name` do marketplace continua `claude-code-widget`. Campo `renames`: `{"claude-code-widget": "opaiva-code-widget"}`. Quando um plugin instalado some do catálogo, o Claude Code segue esse mapa e passa as configurações do usuário para o nome novo (verificado com o 2.1.292 na revisão final).
 4. **`.github/workflows/test.yml`:**
    - os dois passos de validação perdem o `continue-on-error: true` e o comentário sobre o nome reservado;
    - o caminho validado passa a ser `plugins/opaiva-code-widget`;
@@ -65,8 +65,8 @@ Verificado com o Claude Code 2.1.292 em marketplaces descartáveis:
 
 ## Riscos aceitos
 
-- **Quem não ler o README fica na 1.1.1.** Depois do merge, o marketplace não lista mais `claude-code-widget`, então `claude plugin update claude-code-widget@claude-code-widget` não acha versões novas. A 1.1.1 continua funcionando.
-- **Os dois plugins instalados ao mesmo tempo** geram dois widgets e dois hooks para cada pedido. A mitigação é só o aviso no README, por decisão do usuário. Detectar o plugin antigo automaticamente fica fora deste bloco.
+- **Quem estiver na 1.1.1 e atualizar o marketplace sem ler o README:** o plugin antigo deixa de carregar, porque não está mais no catálogo ("failed to load", reproduzido com o 2.1.292 na revisão final). O `renames` faz o Claude Code passar as configurações para `opaiva-code-widget`, e a seção "Update" dos READMEs aponta para a migração. Não foi possível verificar, sem uma sessão autenticada, se uma sessão nova já carrega o plugin novo sem o `install` explícito; por isso o passo a passo continua mandando instalar.
+- **Os dois plugins instalados ao mesmo tempo** geram dois widgets e dois hooks para cada pedido. A mitigação é o aviso no README e o `renames`, que remove o registro antigo quando migra. Sessões já abertas mantêm os hooks antigos até um `/reload-plugins`, e o passo 2 da migração manda fazer isso. Detectar o plugin antigo automaticamente fica fora deste bloco.
 - **O `displayName` "Claude Code Widget" pode entrar numa regra futura.** Hoje ele não é verificado. Se passar a ser, vira um bloco próprio.
 
 ## Testes e verificação
