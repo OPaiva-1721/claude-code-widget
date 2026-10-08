@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0 (2026-10-08)
+
+- **Session title on the cards.** Next to the project, the cards show the session's title: the name you gave it with `/rename`, or the one Claude Code picked. Two sessions in the same project are easy to tell apart.
+- **"All done" sound.** When several sessions were working and the last one finishes, its notice plays a different sound (Windows' "tada").
+- **Double-click to go back.** Double-click the widget (outside its buttons) to bring back the session's window: the finished session on a "finished" notice, otherwise the session you typed in last.
+
 ## 2.0.1 (2026-10-07)
 
 - **Monitor changes.** If the widget's monitor is unplugged while the widget is open, the widget moves to the main screen's corner within a couple of seconds, and goes back to where you put it once that monitor is back. A saved position between monitors of different sizes no longer opens the widget off screen.
