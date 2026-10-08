@@ -141,6 +141,44 @@ Describe 'hook.ps1 end to end' {
             Send-WidgetResponse $box $req.id @{ decision = 'vscode' }
             [void](Complete-Hook $run)
         }
+        It 'UserPromptSubmit marks the session as working and Stop clears it' {
+            $prompt = New-HookEvent 'UserPromptSubmit' $box.Data @{ prompt = 'go' }
+            [void](Complete-Hook (Start-Hook $box $prompt))
+            $busyFile = Join-Path $box.Data "busy\$($prompt.session_id).json"
+            $busyFile | Should -Exist
+            # The prompt may have remembered the window in front (the one running this test): then Stop
+            # would see you watching and write no notice
+            Remove-Item -LiteralPath (Join-Path $box.Data "sessions\$($prompt.session_id).json") -Force -ErrorAction SilentlyContinue
+            $stop = New-HookEvent 'Stop' $box.Data @{ last_assistant_message = 'ok' }
+            $stop.session_id = $prompt.session_id
+            [void](Complete-Hook (Start-Hook $box $stop))
+            $busyFile | Should -Not -Exist
+            $notice = (Get-QueueFiles $box "done-$($stop.session_id)-*.json")[0]
+            ([IO.File]::ReadAllText($notice.FullName, [Text.Encoding]::UTF8) | ConvertFrom-Json).allDone | Should -BeFalse
+        }
+        It 'Stop marks "all done" when it ends a round of several sessions' {
+            $busy = Join-Path $box.Data 'busy'
+            New-Item -ItemType Directory -Force -Path $busy | Out-Null
+            $stop = New-HookEvent 'Stop' $box.Data @{ last_assistant_message = 'ok' }
+            Write-JsonAtomic (Join-Path $box.Data 'busy-round.json') @{ sessions = @('other', $stop.session_id) }
+            Write-JsonAtomic (Join-Path $busy "$($stop.session_id).json") @{ pid = $PID; since = Get-NowMs }
+            [void](Complete-Hook (Start-Hook $box $stop))
+            $notice = (Get-QueueFiles $box "done-$($stop.session_id)-*.json")[0]
+            ([IO.File]::ReadAllText($notice.FullName, [Text.Encoding]::UTF8) | ConvertFrom-Json).allDone | Should -BeTrue
+        }
+        It 'Stop does not mark "all done" while another session is working' {
+            $busy = Join-Path $box.Data 'busy'
+            New-Item -ItemType Directory -Force -Path $busy | Out-Null
+            $stop = New-HookEvent 'Stop' $box.Data @{ last_assistant_message = 'ok' }
+            Write-JsonAtomic (Join-Path $box.Data 'busy-round.json') @{ sessions = @('other', $stop.session_id) }
+            Write-JsonAtomic (Join-Path $busy 'other.json') @{ pid = $PID; since = Get-NowMs }
+            [void](Complete-Hook (Start-Hook $box $stop))
+            $notice = (Get-QueueFiles $box "done-$($stop.session_id)-*.json")[0]
+            $json = [IO.File]::ReadAllText($notice.FullName, [Text.Encoding]::UTF8) | ConvertFrom-Json
+            $json.PSObject.Properties.Name | Should -Contain 'allDone'
+            $json.allDone | Should -BeFalse
+            Join-Path $busy 'other.json' | Should -Exist
+        }
     }
 
     # After a plugin update the old widget keeps running from the old folder; the hook finds it through

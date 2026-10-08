@@ -150,3 +150,64 @@ Describe 'Get-SessionTitle' {
         Get-SessionTitle $path 's-1' | Should -BeExactly 'Near the end'
     }
 }
+
+Describe 'busy sessions and all done' {
+    BeforeEach {
+        Remove-Item -LiteralPath $Busy, $RoundPath -Recurse -Force -ErrorAction SilentlyContinue
+        function Set-FakeBusy([string]$Sid, [int]$ProcessId, [int64]$AgeMs = 0) {
+            New-Item -ItemType Directory -Force -Path $Busy | Out-Null
+            Remove-Item -LiteralPath (Join-Path $Busy "$Sid.json") -Force -ErrorAction SilentlyContinue
+            Write-JsonAtomic (Join-Path $Busy "$Sid.json") @{ pid = $ProcessId; since = (Get-NowMs) - $AgeMs }
+        }
+    }
+    It 'finds the Claude process or 0, without error' {
+        Get-ClaudePid | Should -BeGreaterOrEqual 0
+    }
+    It 'is not "all done" for a session working alone' {
+        Set-SessionBusy 'a'
+        Join-Path $Busy 'a.json' | Should -Exist
+        Complete-SessionBusy 'a' | Should -BeFalse
+        Join-Path $Busy 'a.json' | Should -Not -Exist
+    }
+    It 'is "all done" when the last of two sessions finishes' {
+        Set-SessionBusy 'a'
+        Set-FakeBusy 'a' $PID
+        Set-SessionBusy 'b'
+        Set-FakeBusy 'b' $PID
+        Complete-SessionBusy 'a' | Should -BeFalse
+        Complete-SessionBusy 'b' | Should -BeTrue
+        $RoundPath | Should -Not -Exist
+    }
+    It 'does not count a session whose Claude process is gone, and removes its file' {
+        Set-SessionBusy 'a'
+        Set-FakeBusy 'a' $PID
+        Set-SessionBusy 'dead'
+        Set-FakeBusy 'dead' 2147483640
+        Complete-SessionBusy 'a' | Should -BeTrue
+        Join-Path $Busy 'dead.json' | Should -Not -Exist
+    }
+    It 'does not count a session working for more than 12 hours' {
+        Set-SessionBusy 'a'
+        Set-FakeBusy 'a' $PID
+        Set-SessionBusy 'old'
+        Set-FakeBusy 'old' 0 (13 * 3600 * 1000)
+        Complete-SessionBusy 'a' | Should -BeTrue
+    }
+    It 'counts a recent session with an unknown Claude process' {
+        Set-SessionBusy 'a'
+        Set-FakeBusy 'a' $PID
+        Set-SessionBusy 'unknown'
+        Set-FakeBusy 'unknown' 0
+        Complete-SessionBusy 'a' | Should -BeFalse
+    }
+    It 'starts a new round once nothing is working' {
+        Set-SessionBusy 'a'
+        Set-FakeBusy 'a' $PID
+        Set-SessionBusy 'b'
+        Set-FakeBusy 'b' $PID
+        [void](Complete-SessionBusy 'a')
+        [void](Complete-SessionBusy 'b')
+        Set-SessionBusy 'c'
+        Complete-SessionBusy 'c' | Should -BeFalse
+    }
+}

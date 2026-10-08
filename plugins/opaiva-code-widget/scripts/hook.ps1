@@ -28,6 +28,10 @@ $Data = if ($env:CLAUDE_PLUGIN_DATA) { $env:CLAUDE_PLUGIN_DATA } else { Join-Pat
 $Data = [IO.Path]::GetFullPath($Data).TrimEnd('\')
 $Queue = Join-Path $Data 'queue'
 $Sessions = Join-Path $Data 'sessions'
+# Sessions working right now (busy\<session>.json) and the sessions of the current round
+$Busy = Join-Path $Data 'busy'
+$RoundPath = Join-Path $Data 'busy-round.json'
+$BusyMaxAgeMs = 12 * 3600 * 1000
 $LogPath = Join-Path $Data 'hook.log'
 # Processes that own a terminal window (classic console, Windows Terminal and common alternatives)
 $TerminalHosts = @('windowsterminal.exe', 'openconsole.exe', 'conhost.exe', 'powershell.exe', 'pwsh.exe', 'cmd.exe',
@@ -176,6 +180,71 @@ function Save-SessionWindow([string]$sid, [string]$logTag) {
         Get-ChildItem -LiteralPath $Sessions -File | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } |
             Remove-Item -Force -ErrorAction SilentlyContinue
     } catch { Write-HookLog "$logTag session window: $($_.Exception.Message)" }
+}
+
+# This session's Claude Code process: the first ancestor named claude.exe, else node.exe (npm
+# install), else 0 (unknown)
+function Get-ClaudePid {
+    try {
+        $map = (Get-ProcessTree).map
+        $node = 0
+        $cur = [int]$PID
+        for ($i = 0; $i -lt 16 -and $map.ContainsKey($cur); $i++) {
+            $parent = [int]$map[$cur].ParentProcessId
+            if ($parent -eq 0 -or -not $map.ContainsKey($parent)) { break }
+            $name = ([string]$map[$parent].Name).ToLowerInvariant()
+            if ($name -eq 'claude.exe') { return $parent }
+            if ($name -eq 'node.exe' -and $node -eq 0) { $node = $parent }
+            $cur = $parent
+        }
+        return $node
+    } catch { return 0 }
+}
+
+# Ids of the sessions still working: their Claude process runs (or is unknown) and they started less
+# than 12 hours ago. Files of the other sessions are removed.
+function Get-WorkingSessions {
+    $now = Get-NowMs
+    foreach ($f in @(Get-ChildItem -LiteralPath $Busy -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+        $alive = $false
+        try {
+            $b = [IO.File]::ReadAllText($f.FullName, $Utf8) | ConvertFrom-Json
+            $alive = (($now - [int64]$b.since) -lt $BusyMaxAgeMs) -and
+                ([int]$b.pid -eq 0 -or $null -ne (Get-Process -Id ([int]$b.pid) -ErrorAction SilentlyContinue))
+        } catch {}
+        if ($alive) { $f.BaseName } else { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+# UserPromptSubmit: this session is working. With nothing else working, a new round starts.
+function Set-SessionBusy([string]$Sid) {
+    if (-not $Sid) { return }
+    try {
+        $others = @(Get-WorkingSessions | Where-Object { $_ -ne $Sid })
+        $round = @()
+        if ($others.Count -gt 0 -and (Test-Path -LiteralPath $RoundPath)) {
+            try { $round = @(([IO.File]::ReadAllText($RoundPath, $Utf8) | ConvertFrom-Json).sessions) } catch {}
+        }
+        if ($round -notcontains $Sid) { $round += $Sid }
+        New-Item -ItemType Directory -Force -Path $Busy | Out-Null
+        $file = Join-Path $Busy "$Sid.json"
+        Remove-Item -LiteralPath $file, $RoundPath -Force -ErrorAction SilentlyContinue
+        Write-JsonAtomic $file ([ordered]@{ pid = Get-ClaudePid; since = Get-NowMs })
+        Write-JsonAtomic $RoundPath @{ sessions = @($round) }
+    } catch {}
+}
+
+# Stop: this session is done. $true ("all done") when nothing else is working and the round had at
+# least two sessions; with a single session the usual "finished" sound stays.
+function Complete-SessionBusy([string]$Sid) {
+    try {
+        if ($Sid) { Remove-Item -LiteralPath (Join-Path $Busy "$Sid.json") -Force -ErrorAction SilentlyContinue }
+        if (@(Get-WorkingSessions).Count -gt 0) { return $false }
+        $round = @()
+        try { $round = @(([IO.File]::ReadAllText($RoundPath, $Utf8) | ConvertFrom-Json).sessions) } catch {}
+        Remove-Item -LiteralPath $RoundPath -Force -ErrorAction SilentlyContinue
+        return @($round | Select-Object -Unique).Count -ge 2
+    } catch { return $false }
 }
 
 # The session's remembered window, if it still exists
@@ -363,6 +432,7 @@ function Invoke-Hook($evt) {
     if ($hookEvent -eq 'UserPromptSubmit') {
         Write-HookLog $logTag
         Remove-Done $sid
+        Set-SessionBusy $sid
         Save-SessionWindow $sid $logTag
         return $null
     }
@@ -370,6 +440,8 @@ function Invoke-Hook($evt) {
     if ($hookEvent -eq 'Stop') {
         if (-not $sid) { return $null }
         Remove-Done $sid
+        # Before deciding on the notice: the session stops counting as working even without one
+        $allDone = Complete-SessionBusy $sid
         $sessionWindow = Get-SessionWindow $sid
         if (Test-UserWatching $cwd $sessionWindow) { Write-HookLog "$logTag no notice (session window in front)"; return $null }
         $msg = Format-Snippet (Get-LastAssistantText $evt)
@@ -382,6 +454,7 @@ function Invoke-Hook($evt) {
             cwd     = $cwd
             message = $msg
             title   = Get-SessionTitle $transcript $sid
+            allDone = [bool]$allDone
             # Lets the widget's button go back to that exact window (VS Code or terminal)
             hwnd    = $(if ($sessionWindow) { [int64]$sessionWindow.hwnd } else { 0 })
             kind    = $(if ($sessionWindow) { [string]$sessionWindow.kind } else { '' })
