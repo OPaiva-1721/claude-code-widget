@@ -384,16 +384,20 @@ namespace ClaudeWidget {
         if ($script:canFocus) { [ClaudeWidget.WinFocus]::SetNoActivate($script:hwnd, $true) }
     })
 
+    $script:clickTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:clickTimer.Interval = [TimeSpan]::FromMilliseconds([System.Windows.Forms.SystemInformation]::DoubleClickTime)
+    $script:clickTimer.Add_Tick({ param($sender, $e) $sender.Stop(); try { Switch-Sessions } catch { Write-Log $_ } })
     $win.Add_MouseLeftButtonDown({
         param($src, $e)
         # Buttons, options and the text box handle their own clicks and never get here
-        if ($e.ClickCount -eq 2) { Invoke-DoubleClick; return }
+        if ($e.ClickCount -eq 2) { $script:clickTimer.Stop(); Invoke-DoubleClick; return }
         $left = $win.Left
         $top = $win.Top
         try { $win.DragMove() } catch {}
         # A click without a move keeps the saved spot (its monitor may be unplugged right now);
         # on the idle pill it opens or closes the sessions list
-        if ($win.Left -eq $left -and $win.Top -eq $top) { Switch-Sessions; return }
+        # (after the double-click time, so that a double click does not also toggle the list)
+        if ($win.Left -eq $left -and $win.Top -eq $top) { $script:clickTimer.Stop(); $script:clickTimer.Start(); return }
         $script:anchorRight = $win.Left + $win.ActualWidth
         $script:anchorBottom = $win.Top + $win.ActualHeight
         $script:savedAnchor = @{ right = $script:anchorRight; bottom = $script:anchorBottom }
@@ -992,7 +996,7 @@ namespace ClaudeWidget {
             else { $win.Show() }
         }
         $toggleDnd = { Set-Dnd $Data (-not (Test-Dnd $Data)); Sync-Dnd }
-        $tray.Add_MouseClick({ param($s, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $toggleDnd } })
+        $tray.Add_MouseClick({ param($src, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $toggleDnd } })
         $dndItem.Add_Click({ & $toggleDnd })
         $trayClose.Add_Click({ Close-Widget })
         $tray.Visible = $true

@@ -200,6 +200,16 @@ Describe 'hook.ps1 end to end' {
             [void](Complete-Hook (Start-Hook $box $stop))
             (Get-QueueFiles $box "done-$($stop.session_id)-*.json").Count | Should -Be 1
         }
+        It 'gives up waiting when the mode is turned on while a request is pending' {
+            Set-Dnd $box.Data $false
+            $evt = New-HookEvent 'PermissionRequest' $box.Data @{ tool_name = 'Bash'; tool_input = @{ command = 'ls' } }
+            $run = Start-Hook $box $evt
+            [void](Wait-HookRequest $box)
+            Set-Dnd $box.Data $true
+            $r = Complete-Hook $run 20
+            $r.Stdout | Should -BeNullOrEmpty
+            $run.Clock.Elapsed.TotalSeconds | Should -BeLessThan 15
+        }
     }
 
     # After a plugin update the old widget keeps running from the old folder; the hook finds it through

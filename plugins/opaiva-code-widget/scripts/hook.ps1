@@ -312,6 +312,8 @@ function Wait-Response([string]$id) {
             if ($parentPid -and -not (Get-Process -Id $parentPid -ErrorAction SilentlyContinue)) { $script:waitEnd = 'session ended'; return $null }
             # You walked away with the card on screen: hand it to VS Code / your phone
             if (Test-Away) { $script:waitEnd = 'idle'; return $null }
+            # "Do not disturb" was turned on after this request was written: the widget is hidden
+            if (Test-Dnd $Data) { $script:waitEnd = 'do not disturb'; return $null }
         }
         Start-Sleep -Milliseconds 300
     }
