@@ -67,7 +67,14 @@ function Start-Widget {
             return $true
         }
         Write-HookLog "restarting widget from an older version ($($info.script))"
-        try { Stop-Process -Id ([int]$info.pid) -Force } catch {}
+        # Ask it to close itself first (it removes its tray icon); kill it if it does not within 4 s
+        $quit = Join-Path $Data 'quit.flag'
+        try { [IO.File]::WriteAllText($quit, '') } catch {}
+        for ($i = 0; $i -lt 40 -and (Get-Process -Id ([int]$info.pid) -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 100 }
+        if (Get-Process -Id ([int]$info.pid) -ErrorAction SilentlyContinue) {
+            try { Stop-Process -Id ([int]$info.pid) -Force } catch {}
+        }
+        Remove-Item -LiteralPath $quit -Force -ErrorAction SilentlyContinue
         for ($i = 0; $i -lt 30 -and (Test-Widget); $i++) { Start-Sleep -Milliseconds 100 }
     }
     New-Item -ItemType Directory -Force -Path $Data | Out-Null
