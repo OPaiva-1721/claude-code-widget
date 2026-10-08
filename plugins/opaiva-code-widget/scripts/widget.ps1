@@ -8,7 +8,7 @@
 # It only accepts focus while you type an "Other answer", then gives focus back.
 # Drag to move (position saved in state.json); right-click > Close widget.
 # Started by hook.ps1 with the plugin data dir; usually you never run it by hand.
-# -RenderSamples <samples.json> -OutDir <dir>: draws each state with sample data to transparent PNGs
+# -RenderSamples <samples.json> -OutDir <dir> [-Theme dark|light]: draws each state with sample data to transparent PNGs
 # (README screenshots, see tools/render-screenshots.ps1) and exits, without touching the queue.
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as ANSI. UI text lives in
 # strings.json (read explicitly as UTF-8).
@@ -16,7 +16,8 @@ param(
     [string]$DataDir = (Join-Path $env:USERPROFILE '.claude\opaiva-code-widget'),
     [string]$Lang = '',
     [string]$RenderSamples = '',
-    [string]$OutDir = ''
+    [string]$OutDir = '',
+    [string]$Theme = ''
 )
 $RenderMode = [bool]$RenderSamples
 $ErrorActionPreference = 'Stop'
@@ -32,6 +33,10 @@ $DoneMaxAgeMs = 12 * 3600 * 1000
 
 $Lang = Resolve-Lang $Lang
 $S = Get-Strings $Lang
+
+# Preferences (prefs.json): theme, opacity, volume, scale, minimal pill. -Theme only applies to -RenderSamples.
+$script:prefs = Read-Prefs $Data
+if ($RenderMode -and $Theme) { $script:prefs.theme = $Theme }
 
 # One widget per data dir; hook.ps1 computes the same name to know whether the widget is running
 $MutexName = Get-MutexName $Data
@@ -127,18 +132,46 @@ namespace ClaudeWidget {
         $script:canFocus = $true
     } catch { Write-Log $_ }
 
-    # "Finished" sound (different from the request sound)
-    $script:doneSound = $null
-    $wav = Join-Path $env:WINDIR 'Media\Windows Notify System Generic.wav'
-    if (Test-Path -LiteralPath $wav) {
-        try { $script:doneSound = New-Object System.Media.SoundPlayer $wav; $script:doneSound.Load() } catch { $script:doneSound = $null }
+    # Sounds go through Play-Sound so that the volume setting applies. The WPF MediaPlayer has a Volume;
+    # the classic Windows sound APIs do not, so they are only the fallback (the volume is ignored there,
+    # but 0 still means silence).
+    function Get-SchemeSound([string]$event) {
+        try {
+            $key = Get-Item -LiteralPath "HKCU:\AppEvents\Schemes\Apps\.Default\$event\.Current" -ErrorAction Stop
+            $path = [Environment]::ExpandEnvironmentVariables([string]$key.GetValue(''))
+            if ($path -and (Test-Path -LiteralPath $path)) { return $path }
+        } catch {}
+        return $null
     }
-
-    # "All done" sound: the last session of a round with several sessions finished
-    $script:allDoneSound = $null
-    $tada = Join-Path $env:WINDIR 'Media\tada.wav'
-    if (Test-Path -LiteralPath $tada) {
-        try { $script:allDoneSound = New-Object System.Media.SoundPlayer $tada; $script:allDoneSound.Load() } catch { $script:allDoneSound = $null }
+    $script:sounds = @{}
+    function New-MediaSound([string]$file) {
+        if (-not $file -or -not (Test-Path -LiteralPath $file)) { return $null }
+        try {
+            $p = New-Object System.Windows.Media.MediaPlayer
+            # A file Windows cannot decode: forget it, so that the next play uses the system sound
+            $p.Add_MediaFailed({ param($src, $e) foreach ($k in @($script:sounds.Keys)) { if ([object]::ReferenceEquals($script:sounds[$k], $src)) { $script:sounds[$k] = $null } } })
+            $p.Open([Uri]$file)
+            return $p
+        } catch { Write-Log $_; return $null }
+    }
+    if (-not $RenderMode) {
+        $script:sounds.request = New-MediaSound (Get-SchemeSound 'SystemAsterisk')
+        $script:sounds.done = New-MediaSound (Join-Path $env:WINDIR 'Media\Windows Notify System Generic.wav')
+        $script:sounds.allDone = New-MediaSound (Join-Path $env:WINDIR 'Media\tada.wav')
+    }
+    function Play-Sound([string]$name, [scriptblock]$fallback) {
+        $vol = [int]$script:prefs.volume
+        if ($vol -le 0) { return }
+        $p = $script:sounds[$name]
+        if ($p) {
+            try {
+                $p.Volume = $vol / 100.0
+                $p.Position = [TimeSpan]::Zero
+                $p.Play()
+                return
+            } catch { Write-Log $_ }
+        }
+        & $fallback
     }
 
     [xml]$xaml = @'
@@ -210,7 +243,7 @@ namespace ClaudeWidget {
       <StackPanel x:Name="IdlePanel" Orientation="Vertical" Margin="14,9,16,9" Background="Transparent">
         <StackPanel Orientation="Horizontal">
           <Ellipse Width="8" Height="8" Fill="#5FB98A" VerticalAlignment="Center" Margin="0,0,9,0"/>
-          <TextBlock Text="Claude Code" Foreground="#E8E8EC" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          <TextBlock x:Name="IdleTitle" Text="Claude Code" Foreground="#E8E8EC" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
           <TextBlock x:Name="IdleText" Foreground="#7E7E88" FontSize="12" VerticalAlignment="Center"/>
         </StackPanel>
         <StackPanel x:Name="SessionsList" Margin="0,8,0,0" Visibility="Collapsed"/>
@@ -331,7 +364,7 @@ namespace ClaudeWidget {
 
     $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
     $ui = @{}
-    foreach ($n in 'Card', 'IdlePanel', 'IdleText', 'SessionsList', 'ChangeBox', 'ChangeLines', 'AlwaysList', 'ReqPanel', 'ReqTitle', 'QPanel', 'QTitle', 'DonePanel', 'DoneTitle',
+    foreach ($n in 'Card', 'IdlePanel', 'IdleTitle', 'IdleText', 'SessionsList', 'ChangeBox', 'ChangeLines', 'AlwaysList', 'ReqPanel', 'ReqTitle', 'QPanel', 'QTitle', 'DonePanel', 'DoneTitle',
         'ReqDot', 'Countdown', 'Tool', 'ProjectChip', 'Project', 'QueueChip', 'QueueText', 'Desc', 'Detail', 'Cwd',
         'BtnApprove', 'BtnDeny', 'BtnVs', 'QCountdown', 'QDot', 'QProjectChip', 'QProject', 'QQueueChip', 'QQueueText',
         'QList', 'BtnAnswer', 'BtnQVs', 'DoneAgo', 'DoneProjectChip', 'DoneProject', 'DoneMoreChip', 'DoneMoreText',
@@ -429,14 +462,44 @@ namespace ClaudeWidget {
     $script:typing = $false    # focus allowed to type an "Other answer"
     $script:prevFg = [IntPtr]::Zero
 
+    # Every color in this file is written in the dark theme; the current theme's map translates it
+    $script:colorMap = @{}
     $script:brushes = @{}
-    function Get-Brush([string]$hex) {
+    function New-FrozenBrush([string]$hex) {
         if (-not $script:brushes.ContainsKey($hex)) {
             $b = (New-Object System.Windows.Media.BrushConverter).ConvertFromString($hex)
             $b.Freeze()
             $script:brushes[$hex] = $b
         }
         return $script:brushes[$hex]
+    }
+    function Get-Brush([string]$hex) { return New-FrozenBrush (Convert-ThemeColor $hex $script:colorMap) }
+
+    # Switches the theme live: recolors every element already created (walking the logical tree), by
+    # way of the dark color it started from; what is created later is translated by Get-Brush.
+    function Convert-ElementColors($el, [hashtable]$back, [hashtable]$new) {
+        foreach ($n in 'Foreground', 'Background', 'BorderBrush', 'Fill', 'Stroke', 'CaretBrush', 'SelectionBrush') {
+            try {
+                $prop = $el.GetType().GetProperty($n)
+                if (-not $prop -or -not $prop.CanWrite -or $prop.GetIndexParameters().Count -ne 0) { continue }
+                $b = $prop.GetValue($el, $null)
+                if ($b -isnot [System.Windows.Media.SolidColorBrush] -or $b.Color.A -ne 255) { continue }
+                $hex = '#{0:X2}{1:X2}{2:X2}' -f $b.Color.R, $b.Color.G, $b.Color.B
+                $dark = Convert-ThemeColor $hex $back
+                $target = Convert-ThemeColor $dark $new
+                if ($target -ne $hex) { $prop.SetValue($el, (New-FrozenBrush $target), $null) }
+            } catch {}
+        }
+        foreach ($child in [System.Windows.LogicalTreeHelper]::GetChildren($el)) {
+            if ($child -is [System.Windows.DependencyObject]) { Convert-ElementColors $child $back $new }
+        }
+    }
+    function Set-Theme([string]$name) {
+        $new = Get-ColorMap $name
+        $back = @{}
+        foreach ($k in $script:colorMap.Keys) { $back[$script:colorMap[$k]] = $k }
+        Convert-ElementColors $win $back $new
+        $script:colorMap = $new
     }
 
     # --- Focus: only while typing a free-text answer ---
@@ -591,7 +654,7 @@ namespace ClaudeWidget {
         try { Set-ChangeView $r.change } catch { Write-Log $_; $ui.ChangeBox.Visibility = 'Collapsed' }
         try { Set-AlwaysButtons $r } catch { Write-Log $_; $ui.AlwaysList.Children.Clear(); $ui.AlwaysList.Visibility = 'Collapsed' }
         Set-Panel 'ReqPanel'
-        Invoke-Attention $r.id { [System.Media.SystemSounds]::Asterisk.Play() }
+        Invoke-Attention $r.id { Play-Sound 'request' { [System.Media.SystemSounds]::Asterisk.Play() } }
     }
 
     # ---------------- Question (AskUserQuestion) ----------------
@@ -740,7 +803,7 @@ namespace ClaudeWidget {
         }
         Update-QVisuals
         Set-Panel 'QPanel'
-        Invoke-Attention $r.id { [System.Media.SystemSounds]::Asterisk.Play() }
+        Invoke-Attention $r.id { Play-Sound 'request' { [System.Media.SystemSounds]::Asterisk.Play() } }
     }
 
     function Select-Option([hashtable]$tag) {
@@ -837,6 +900,7 @@ namespace ClaudeWidget {
         $rows = @($rows)
         $script:sessionRows = $rows
         $ui.IdleText.Text = $Sep + $(if ($rows.Count -eq 0) { $S.idle } elseif ($rows.Count -eq 1) { $S.workingOne } else { $S.workingMany -f $rows.Count })
+        Update-IdleLook
         if ($rows.Count -eq 0) { $script:sessionsOpen = $false }
         $list = $ui.SessionsList
         $list.Children.Clear()
@@ -921,11 +985,8 @@ namespace ClaudeWidget {
             Set-Panel 'DonePanel'
             $allDone = [bool]$d.allDone
             Invoke-Attention $d.key {
-                if ($allDone) {
-                    if ($script:allDoneSound) { $script:allDoneSound.Play() } else { [System.Media.SystemSounds]::Exclamation.Play() }
-                }
-                elseif ($script:doneSound) { $script:doneSound.Play() }
-                else { [System.Media.SystemSounds]::Beep.Play() }
+                if ($allDone) { Play-Sound 'allDone' { [System.Media.SystemSounds]::Exclamation.Play() } }
+                else { Play-Sound 'done' { [System.Media.SystemSounds]::Beep.Play() } }
             }
         }
         if ($total -gt 1) {
@@ -1027,12 +1088,88 @@ namespace ClaudeWidget {
         }
         $win.Close()
     }
+    function Set-Opacity { $win.Opacity = [double]$script:prefs.opacity }
+    function Set-CardScale([double]$sc) {
+        $ui.Card.LayoutTransform = New-Object System.Windows.Media.ScaleTransform $sc, $sc
+    }
+    function Set-Scale { Set-CardScale ([double]$script:prefs.scale); Update-Fit }
+    # A tall card (a long question) at 150% would push its buttons below the screen: use the biggest
+    # scale, up to the chosen one, at which the window fits the work area (the margin is not scaled)
+    function Update-Fit {
+        $cur = if ($ui.Card.LayoutTransform -is [System.Windows.Media.ScaleTransform]) { $ui.Card.LayoutTransform.ScaleY } else { 1.0 }
+        if ($win.ActualHeight -le 0 -or $cur -le 0) { return }
+        $margin = 28.0
+        $unscaled = ($win.ActualHeight - $margin) / $cur + $margin
+        $target = Get-FitScale ([double]$script:prefs.scale) $unscaled ([System.Windows.SystemParameters]::WorkArea.Height)
+        if ([math]::Abs($target - $cur) -gt 0.005) { Set-CardScale $target }
+    }
+    if (-not $RenderMode) { $win.Add_SizeChanged({ try { Update-Fit } catch { Write-Log $_ } }) }
+    # The idle pill's tooltip carries the status text when the pill is minimal (the text itself is hidden)
+    function Update-IdleLook {
+        $min = [bool]$script:prefs.minimal
+        $v = if ($min) { 'Collapsed' } else { 'Visible' }
+        $ui.IdleTitle.Visibility = $v
+        $ui.IdleText.Visibility = $v
+        $status = if ($ui.IdleText.Text.Length -gt $Sep.Length) { $ui.IdleText.Text.Substring($Sep.Length) } else { '' }
+        $ui.IdlePanel.ToolTip = if ($min -and $status) { $status + [Environment]::NewLine + $S.idleTip } else { $S.idleTip }
+    }
+    function Set-Minimal { Update-IdleLook }
+    # Right-click menu: each submenu lists fixed choices with the current one checked
+    $script:prefItems = New-Object System.Collections.ArrayList
+    function Sync-MenuChecks {
+        foreach ($e in $script:prefItems) { $e.item.IsChecked = ($script:prefs[$e.key] -eq $e.value) }
+    }
+    function Set-Pref([string]$key, $value) {
+        $script:prefs[$key] = $value
+        switch ($key) {
+            'theme' { Set-Theme (Resolve-Theme $script:prefs.theme (Get-WindowsLightTheme)) }
+            'opacity' { Set-Opacity }
+            'scale' { Set-Scale }
+            'minimal' { Set-Minimal }
+        }
+        [void](Save-Prefs $Data $script:prefs)
+        Sync-MenuChecks
+    }
+    function Add-ChoiceMenu($parent, [string]$header, $choices) {
+        $sub = New-Object System.Windows.Controls.MenuItem
+        $sub.Header = $header
+        foreach ($c in $choices) {
+            $item = New-Object System.Windows.Controls.MenuItem
+            $item.Header = $c.label
+            $item.Tag = @{ key = $c.key; value = $c.value }
+            $item.Add_Click({ param($src, $e) Set-Pref $src.Tag.key $src.Tag.value })
+            [void]$script:prefItems.Add(@{ item = $item; key = $c.key; value = $c.value })
+            [void]$sub.Items.Add($item)
+        }
+        [void]$parent.Items.Add($sub)
+    }
     $menu = New-Object System.Windows.Controls.ContextMenu
+    Add-ChoiceMenu $menu $S.menuTheme @(
+        @{ label = $S.themeDark; key = 'theme'; value = 'dark' }
+        @{ label = $S.themeLight; key = 'theme'; value = 'light' }
+        @{ label = $S.themeAuto; key = 'theme'; value = 'auto' })
+    Add-ChoiceMenu $menu $S.menuOpacity @(foreach ($o in 1.0, 0.9, 0.8, 0.7, 0.6) { @{ label = ('{0}%' -f [int]($o * 100)); key = 'opacity'; value = [double]$o } })
+    Add-ChoiceMenu $menu $S.menuVolume @(foreach ($v in 0, 25, 50, 75, 100) { @{ label = $(if ($v -eq 0) { $S.volumeMute } else { '{0}%' -f $v }); key = 'volume'; value = [int]$v } })
+    Add-ChoiceMenu $menu $S.menuScale @(foreach ($z in 1.0, 1.25, 1.5) { @{ label = ('{0}%' -f [int]($z * 100)); key = 'scale'; value = [double]$z } })
+    $minItem = New-Object System.Windows.Controls.MenuItem
+    $minItem.Header = $S.menuMinimal
+    $minItem.Add_Click({ param($src, $e) Set-Pref 'minimal' (-not [bool]$script:prefs.minimal); $src.IsChecked = [bool]$script:prefs.minimal })
+    $minItem.IsChecked = [bool]$script:prefs.minimal
+    [void]$menu.Items.Add($minItem)
+    [void]$menu.Items.Add((New-Object System.Windows.Controls.Separator))
     $closeItem = New-Object System.Windows.Controls.MenuItem
     $closeItem.Header = $S.closeWidget
     $closeItem.Add_Click({ Close-Widget })
     [void]$menu.Items.Add($closeItem)
     $ui.Card.ContextMenu = $menu
+    Sync-MenuChecks
+    # The README screenshots are always drawn at normal opacity and size
+    if (-not $RenderMode) {
+        Set-Opacity
+        Set-Scale
+    }
+    Update-IdleLook
+    try { Set-Theme (Resolve-Theme $script:prefs.theme (Get-WindowsLightTheme)) } catch { Write-Log $_ }
 
     # --- Tray icon and "do not disturb" ---
     # The mode is the file dnd.flag: hook.ps1 sends requests to VS Code while it exists, and here the

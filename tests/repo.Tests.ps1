@@ -124,6 +124,12 @@ Describe 'repository rules' {
 
     # PowerShell variable names ignore letter case, and scope is dynamic: an event handler with
     # param($s, ...) hides the strings table $S for everything it calls (the tray tooltip went blank)
+    It 'widget.ps1 plays sounds only through Play-Sound (the volume setting must apply)' {
+        $text = [IO.File]::ReadAllText((Join-Path $repo 'plugins\opaiva-code-widget\scripts\widget.ps1'))
+        # The only direct SystemSounds / SoundPlayer uses are the fallbacks passed to Play-Sound
+        $direct = [regex]::Matches($text, '(?m)^(?!.*Play-Sound).*(SystemSounds|SoundPlayer).*$')
+        $direct.Count | Should -Be 0
+    }
     It 'widget.ps1 has no handler parameter named like the strings table ($S)' {
         $text = [IO.File]::ReadAllText((Join-Path $repo 'plugins\opaiva-code-widget\scripts\widget.ps1'))
         [regex]::Matches($text, '(?i)param\(([^)]*)\)') | ForEach-Object {

@@ -501,3 +501,168 @@ Describe 'Format-RuleText' {
         Format-RuleText $null | Should -BeExactly ''
     }
 }
+
+Describe 'Read-Prefs / Save-Prefs' {
+    BeforeEach {
+        $dir = Join-Path $TestDrive ('p' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $file = Join-Path $dir 'prefs.json'
+    }
+    It 'gives the defaults when the file is missing' {
+        $p = Read-Prefs $dir
+        $p.theme | Should -Be 'dark'
+        $p.opacity | Should -Be 1.0
+        $p.volume | Should -Be 100
+        $p.scale | Should -Be 1.0
+        $p.minimal | Should -BeFalse
+    }
+    It 'gives the defaults when the file is not JSON' {
+        [IO.File]::WriteAllText($file, '{{ not json')
+        (Read-Prefs $dir).theme | Should -Be 'dark'
+    }
+    It 'reads valid values' {
+        [IO.File]::WriteAllText($file, '{"theme":"light","opacity":0.8,"volume":25,"scale":1.5,"minimal":true}')
+        $p = Read-Prefs $dir
+        $p.theme | Should -Be 'light'
+        $p.opacity | Should -Be 0.8
+        $p.volume | Should -Be 25
+        $p.scale | Should -Be 1.5
+        $p.minimal | Should -BeTrue
+    }
+    It 'falls back field by field when a value is invalid' {
+        [IO.File]::WriteAllText($file, '{"theme":"pink","opacity":"x","volume":true,"scale":null,"minimal":"yes"}')
+        $p = Read-Prefs $dir
+        $p.theme | Should -Be 'dark'
+        $p.opacity | Should -Be 1.0
+        $p.volume | Should -Be 100
+        $p.scale | Should -Be 1.0
+        $p.minimal | Should -BeFalse
+    }
+    It 'keeps the valid fields next to an invalid one' {
+        [IO.File]::WriteAllText($file, '{"theme":"auto","opacity":"x","volume":50}')
+        $p = Read-Prefs $dir
+        $p.theme | Should -Be 'auto'
+        $p.volume | Should -Be 50
+    }
+    It 'limits numbers to their range and snaps the scale to the nearest allowed one' {
+        [IO.File]::WriteAllText($file, '{"opacity":0.1,"volume":1000000000,"scale":1.4}')
+        $p = Read-Prefs $dir
+        $p.opacity | Should -Be 0.5
+        $p.volume | Should -Be 100
+        $p.scale | Should -Be 1.5
+        [IO.File]::WriteAllText($file, '{"opacity":7,"volume":-5,"scale":0.2}')
+        $p = Read-Prefs $dir
+        $p.opacity | Should -Be 1.0
+        $p.volume | Should -Be 0
+        $p.scale | Should -Be 1.0
+    }
+    It 'ignores NaN and infinity' {
+        [IO.File]::WriteAllText($file, '{"opacity":"NaN","volume":"Infinity","scale":"-Infinity"}')
+        $p = Read-Prefs $dir
+        $p.opacity | Should -Be 1.0
+        $p.volume | Should -Be 100
+        $p.scale | Should -Be 1.0
+    }
+    It 'writes what it reads back (round trip)' {
+        $want = @{ theme = 'auto'; opacity = 0.7; volume = 0; scale = 1.25; minimal = $true }
+        Save-Prefs $dir $want | Should -BeTrue
+        $p = Read-Prefs $dir
+        foreach ($k in $want.Keys) { $p[$k] | Should -Be $want[$k] }
+    }
+    It 'replaces an existing file' {
+        Save-Prefs $dir @{ theme = 'light'; opacity = 1.0; volume = 100; scale = 1.0; minimal = $false } | Out-Null
+        Save-Prefs $dir @{ theme = 'dark'; opacity = 1.0; volume = 100; scale = 1.0; minimal = $false } | Should -BeTrue
+        (Read-Prefs $dir).theme | Should -Be 'dark'
+    }
+    It 'returns false instead of throwing when the folder does not exist' {
+        Save-Prefs (Join-Path $TestDrive 'nope\nope') (Get-DefaultPrefs) | Should -BeFalse
+    }
+}
+
+Describe 'Resolve-Theme' {
+    It 'resolves <theme> with Windows light=<light> to <want>' -ForEach @(
+        @{ theme = 'dark'; light = $false; want = 'dark' }
+        @{ theme = 'dark'; light = $true; want = 'dark' }
+        @{ theme = 'light'; light = $false; want = 'light' }
+        @{ theme = 'auto'; light = $true; want = 'light' }
+        @{ theme = 'auto'; light = $false; want = 'dark' }
+        @{ theme = 'weird'; light = $true; want = 'dark' }
+    ) {
+        Resolve-Theme $theme $light | Should -Be $want
+    }
+}
+
+Describe 'Get-ColorMap' {
+    BeforeAll {
+        $widgetText = [IO.File]::ReadAllText((Join-Path (Split-Path -Parent $PSScriptRoot) 'plugins\opaiva-code-widget\scripts\widget.ps1'))
+        $native = @('#FFFFFF', '#D97757', '#2F6F4E')   # same in both themes
+    }
+    It 'is empty for the dark theme' {
+        (Get-ColorMap 'dark').Count | Should -Be 0
+    }
+    It 'has unique values, none of them a key or a native color' {
+        $m = Get-ColorMap 'light'
+        $m.Count | Should -BeGreaterThan 20
+        @($m.Values | Select-Object -Unique).Count | Should -Be $m.Count
+        foreach ($v in $m.Values) {
+            $m.ContainsKey($v) | Should -BeFalse -Because "$v is also a key"
+            $native -contains $v | Should -BeFalse -Because "$v is a native color"
+        }
+    }
+    It 'covers every color written in widget.ps1' {
+        $m = Get-ColorMap 'light'
+        $hex = [regex]::Matches($widgetText, '#[0-9A-Fa-f]{6}(?![0-9A-Fa-f])') | ForEach-Object { $_.Value.ToUpper() } | Sort-Object -Unique
+        $missing = @($hex | Where-Object { -not $m.ContainsKey($_) -and ($native -notcontains $_) })
+        $missing | Should -BeNullOrEmpty
+    }
+    It 'keeps text readable: dark text on the light card, light text on the dark card' {
+        function Get-Lum([string]$h) { (0.299 * [Convert]::ToInt32($h.Substring(1, 2), 16) + 0.587 * [Convert]::ToInt32($h.Substring(3, 2), 16) + 0.114 * [Convert]::ToInt32($h.Substring(5, 2), 16)) }
+        $m = Get-ColorMap 'light'
+        (Get-Lum $m['#1E1E22']) | Should -BeGreaterThan 200   # card
+        (Get-Lum $m['#F4F4F6']) | Should -BeLessThan 60       # title
+        (Get-Lum $m['#E8E8EC']) | Should -BeLessThan 60       # main text
+    }
+}
+
+Describe 'Convert-ThemeColor' {
+    It 'maps a known color, ignoring letter case' {
+        $m = @{ '#1E1E22' = '#FAFAFB' }
+        Convert-ThemeColor '#1e1e22' $m | Should -Be '#FAFAFB'
+    }
+    It 'keeps a color that has no entry' {
+        Convert-ThemeColor '#D97757' @{ '#1E1E22' = '#FAFAFB' } | Should -Be '#D97757'
+    }
+    It 'keeps everything with an empty map' {
+        Convert-ThemeColor '#1E1E22' @{} | Should -Be '#1E1E22'
+    }
+    It 'goes back to the original color through the reverse map' {
+        $m = Get-ColorMap 'light'
+        $back = @{}
+        foreach ($k in $m.Keys) { $back[$m[$k]] = $k }
+        foreach ($k in $m.Keys) { Convert-ThemeColor (Convert-ThemeColor $k $m) $back | Should -Be $k }
+    }
+}
+
+Describe 'Get-FitScale' {
+    It 'keeps the chosen scale when the card fits the work area' {
+        Get-FitScale 1.5 500 1000 | Should -Be 1.5
+    }
+    It 'shrinks the scale so that the card still fits the work area' {
+        # 800 DIP tall at 100% on a 1000 DIP work area: 1.5 would need 1200
+        Get-FitScale 1.5 800 1000 | Should -Be 1.25
+    }
+    It 'never goes above the chosen scale' {
+        Get-FitScale 1.0 100 1000 | Should -Be 1.0
+    }
+    It 'shrinks below 100% when even the normal size does not fit, but not below 50%' {
+        Get-FitScale 1.0 1250 1000 | Should -Be 0.8
+        Get-FitScale 1.0 5000 1000 | Should -Be 0.5
+    }
+    It 'rounds down so that the result never overflows' {
+        Get-FitScale 1.5 900 1000 | Should -Be 1.11
+    }
+    It 'ignores a zero or negative height (not measured yet)' {
+        Get-FitScale 1.5 0 1000 | Should -Be 1.5
+        Get-FitScale 1.25 -5 1000 | Should -Be 1.25
+    }
+}

@@ -69,6 +69,23 @@ Describe 'widget.ps1 rendering' -Tag 'Desktop' {
             (Get-Item -LiteralPath $png).Length | Should -BeGreaterThan 1024
         }
     }
+    It 'draws the light theme with a light card and the dark theme with a dark card' {
+        Add-Type -AssemblyName System.Drawing
+        function Get-CardPixel([string]$theme) {
+            $out = Join-Path $TestDrive "t-$theme"
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $widget -RenderSamples $samples -OutDir $out -Lang en -Theme $theme
+            $LASTEXITCODE | Should -Be 0
+            $bmp = New-Object System.Drawing.Bitmap (Join-Path $out 'permission.png')
+            try {
+                # 2x render: x = 50 px is inside the card's left padding, at mid height there is no content
+                $c = $bmp.GetPixel(50, [int]($bmp.Height / 2))
+                return [int](($c.R + $c.G + $c.B) / 3)
+            }
+            finally { $bmp.Dispose() }
+        }
+        (Get-CardPixel 'light') | Should -BeGreaterThan 200
+        (Get-CardPixel 'dark') | Should -BeLessThan 80
+    }
 }
 
 Describe 'widget.ps1 queue loop' -Tag 'Desktop' {
@@ -308,5 +325,51 @@ Describe 'widget.ps1 global hotkeys' -Tag 'Desktop' {
             [void]$proc.WaitForExit(5000)
             Remove-Item -LiteralPath $data -Recurse -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+
+Describe 'widget.ps1 preferences' -Tag 'Desktop' {
+    BeforeAll {
+        function Get-PillSize([string]$prefsJson) {
+            $data = Join-Path ([IO.Path]::GetTempPath()) ('ccw-widget-' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path (Join-Path $data 'queue') | Out-Null
+            # Top-left corner, so that nobody clicks the test widget by accident
+            [IO.File]::WriteAllText((Join-Path $data 'state.json'), '{"right":420,"bottom":220}')
+            if ($prefsJson) { [IO.File]::WriteAllText((Join-Path $data 'prefs.json'), $prefsJson) }
+            $proc = Start-Process powershell.exe -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+                '-File', ('"{0}"' -f $widget), '-DataDir', ('"{0}"' -f $data), '-Lang', 'en'
+            try {
+                # The window size is settled when two readings 400 ms apart agree
+                $size = $null
+                $prev = ''
+                $deadline = (Get-Date).AddSeconds(30)
+                while (-not $size -and (Get-Date) -lt $deadline) {
+                    $cur = ''
+                    foreach ($r in [CcwTest.Windows]::Rects($proc.Id)) { if (-not $cur) { $cur = '{0}x{1}' -f ($r[2] - $r[0]), ($r[3] - $r[1]) } }
+                    if ($cur -and $cur -eq $prev) { $w, $h = $cur -split 'x'; $size = @{ w = [int]$w; h = [int]$h } }
+                    $prev = $cur
+                    Start-Sleep -Milliseconds 400
+                }
+                Join-Path $data 'widget.log' | Should -Not -Exist
+                return $size
+            }
+            finally {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                [void]$proc.WaitForExit(5000)
+                Remove-Item -LiteralPath $data -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    It 'scale 1.5 makes the pill bigger, and the minimal pill smaller' {
+        $normal = Get-PillSize ''
+        $big = Get-PillSize '{"scale":1.5}'
+        $min = Get-PillSize '{"minimal":true}'
+        $big.w | Should -BeGreaterThan ($normal.w * 1.2)
+        $big.h | Should -BeGreaterThan ($normal.h * 1.2)
+        $min.w | Should -BeLessThan ($normal.w * 0.7)
+    }
+    It 'starts with garbage in prefs.json without errors' {
+        $size = Get-PillSize '{"theme":7,"opacity":"x","scale":[1]}'
+        $size | Should -Not -BeNullOrEmpty
     }
 }
