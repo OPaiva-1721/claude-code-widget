@@ -1,12 +1,14 @@
 {
   "en": {
     "permission": {
+      "title": "Login form validation",
       "tool": "Bash",
       "description": "Run the test suite before committing",
       "detail": "npm test -- --watch=false",
       "cwd": "C:\\dev\\my-app"
     },
     "question": {
+      "title": "New billing service",
       "cwd": "C:\\dev\\my-app",
       "questions": [
         {
@@ -32,18 +34,21 @@
       "selected": [["PostgreSQL"], ["Unit tests", "Lint"]]
     },
     "done": {
+      "title": "Login form validation",
       "cwd": "C:\\dev\\my-app",
       "message": "Done: the login page now validates the e-mail format before submitting. I added 6 unit tests and all of them pass."
     }
   },
   "pt": {
     "permission": {
+      "title": "Validação do login",
       "tool": "Bash",
       "description": "Rodar os testes antes do commit",
       "detail": "npm test -- --watch=false",
       "cwd": "C:\\dev\\meu-app"
     },
     "question": {
+      "title": "Serviço de cobrança",
       "cwd": "C:\\dev\\meu-app",
       "questions": [
         {
@@ -69,6 +74,7 @@
       "selected": [["PostgreSQL"], ["Testes unitários", "Lint"]]
     },
     "done": {
+      "title": "Validação do login",
       "cwd": "C:\\dev\\meu-app",
       "message": "Pronto: a tela de login agora valida o formato do e-mail antes de enviar. Adicionei 6 testes unitários e todos passam."
     }
