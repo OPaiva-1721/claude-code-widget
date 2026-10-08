@@ -49,6 +49,57 @@ Describe 'hook.ps1 end to end' {
             $r.ExitCode | Should -Be 0
             $r.Stdout | Should -BeNullOrEmpty
         }
+        Context 'Edit with suggestions' {
+            BeforeAll {
+                function New-EditEvent($Sandbox) {
+                    $e = New-HookEvent 'PermissionRequest' $Sandbox.Data @{
+                        tool_name = 'Edit'
+                        tool_input = @{ file_path = 'C:\dev\a.ps1'; old_string = "keep`nold"; new_string = "keep`nnew" }
+                    }
+                    $e.permission_suggestions = @(
+                        @{ type = 'removeRules'; rules = @([ordered]@{ toolName = 'Bash' }); behavior = 'allow'; destination = 'userSettings' },
+                        [ordered]@{ type = 'addRules'; rules = @([ordered]@{ toolName = 'Edit'; ruleContent = 'src/**' }); behavior = 'allow'; destination = 'session'; mode = $null },
+                        @{ type = 'setMode'; behavior = 'allow'; destination = 'session'; mode = 'acceptEdits' })
+                    return $e
+                }
+            }
+            It 'sends the change and only the offered suggestions to the widget' {
+                $run = Start-Hook $box (New-EditEvent $box)
+                $req = Wait-HookRequest $box
+                $req.change.kind | Should -BeExactly 'edit'
+                $req.change.edits[0].old | Should -BeExactly "keep`nold"
+                @($req.suggestions).Count | Should -Be 2
+                $req.suggestions[0].index | Should -Be 1
+                $req.suggestions[0].rules[0].toolName | Should -BeExactly 'Edit'
+                $req.suggestions[0].rules[0].ruleContent | Should -BeExactly 'src/**'
+                $req.suggestions[1].index | Should -Be 2
+                Send-WidgetResponse $box $req.id @{ decision = 'vscode' }
+                [void](Complete-Hook $run)
+            }
+            It 'allowAlways with a valid index prints that suggestion as updatedPermissions' {
+                $run = Start-Hook $box (New-EditEvent $box)
+                $req = Wait-HookRequest $box
+                Send-WidgetResponse $box $req.id @{ decision = 'allowAlways'; index = 1 }
+                $r = Complete-Hook $run
+                $r.Stdout | Should -BeExactly '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"addRules","rules":[{"toolName":"Edit","ruleContent":"src/**"}],"behavior":"allow","destination":"session"}]}}}'
+            }
+            It 'allowAlways with an index that was not offered only allows' {
+                foreach ($bad in 0, 7, -1) {
+                    $run = Start-Hook $box (New-EditEvent $box)
+                    $req = Wait-HookRequest $box
+                    Send-WidgetResponse $box $req.id @{ decision = 'allowAlways'; index = $bad }
+                    $r = Complete-Hook $run
+                    $r.Stdout | Should -BeExactly '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+                }
+            }
+            It 'ignores suggestion content in the response: only the index counts' {
+                $run = Start-Hook $box (New-EditEvent $box)
+                $req = Wait-HookRequest $box
+                Send-WidgetResponse $box $req.id @{ decision = 'allowAlways'; index = 'abc'; type = 'addRules'; rules = @([ordered]@{ toolName = 'Bash' }); destination = 'userSettings' }
+                $r = Complete-Hook $run
+                $r.Stdout | Should -BeExactly '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+            }
+        }
         It 'sends non-ASCII input to the widget intact' {
             $command = 'echo ' + [char]0x00E7 + [char]0x00E3 + 'o'
             $run = Start-Hook $box (New-BashEvent $box $command)

@@ -39,6 +39,22 @@ namespace CcwTest {
 }
 '@
     }
+    if (-not ('CcwTest.Keys' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace CcwTest {
+    public static class Keys {
+        [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+        // Presses the keys together (down in order, up in reverse)
+        public static void Chord(byte[] vks) {
+            foreach (var k in vks) keybd_event(k, 0, 0, UIntPtr.Zero);
+            for (int i = vks.Length - 1; i >= 0; i--) keybd_event(vks[i], 0, 2, UIntPtr.Zero);
+        }
+    }
+}
+'@
+    }
 }
 AfterAll { $env:CLAUDE_WIDGET_NO_TRAY = $savedNoTray }
 
@@ -47,7 +63,7 @@ Describe 'widget.ps1 rendering' -Tag 'Desktop' {
         $out = Join-Path $TestDrive $lang
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $widget -RenderSamples $samples -OutDir $out -Lang $lang
         $LASTEXITCODE | Should -Be 0
-        foreach ($name in 'idle', 'sessions', 'permission', 'question', 'done') {
+        foreach ($name in 'idle', 'sessions', 'permission', 'edit', 'question', 'done') {
             $png = Join-Path $out "$name.png"
             $png | Should -Exist
             (Get-Item -LiteralPath $png).Length | Should -BeGreaterThan 1024
@@ -181,6 +197,111 @@ Describe 'widget.ps1 quit request' -Tag 'Desktop' {
             while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath (Join-Path $data 'widget.json'))) { Start-Sleep -Milliseconds 250 }
             Start-Sleep -Seconds 3
             $proc.HasExited | Should -BeFalse
+        }
+        finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            [void]$proc.WaitForExit(5000)
+            Remove-Item -LiteralPath $data -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe 'widget.ps1 global hotkeys' -Tag 'Desktop' {
+    BeforeAll {
+        function New-PermissionRequestFile([string]$Queue, [string]$Id) {
+            $req = [ordered]@{ id = $Id; pid = $PID; kind = 'permission'; created = (Get-NowMs); timeout = 300; cwd = 'C:\dev\app'
+                tool = 'Bash'; description = 'x'; detail = 'ls'; title = ''; change = $null; suggestions = @() }
+            Write-JsonAtomic (Join-Path $Queue "req-$Id.json") $req
+        }
+        function Start-HotkeyWidget([string]$Data, [bool]$Enabled) {
+            # In the top-left corner, away from where the real widget shows its cards: a person who sees a
+            # test card there must not mistake it for a real request
+            [IO.File]::WriteAllText((Join-Path $Data 'state.json'), '{"right":520,"bottom":330}')
+            $saved = @{}
+            foreach ($n in 'CLAUDE_WIDGET_HOTKEYS', 'CLAUDE_WIDGET_KEY_APPROVE', 'CLAUDE_WIDGET_KEY_DENY', 'CLAUDE_WIDGET_KEY_DND') { $saved[$n] = [Environment]::GetEnvironmentVariable($n) }
+            [Environment]::SetEnvironmentVariable('CLAUDE_WIDGET_HOTKEYS', $(if ($Enabled) { '1' } else { $null }))
+            [Environment]::SetEnvironmentVariable('CLAUDE_WIDGET_KEY_APPROVE', 'Ctrl+Alt+F13')
+            [Environment]::SetEnvironmentVariable('CLAUDE_WIDGET_KEY_DENY', 'Ctrl+Alt+F14')
+            [Environment]::SetEnvironmentVariable('CLAUDE_WIDGET_KEY_DND', 'Ctrl+Alt+F15')
+            try {
+                return Start-Process powershell.exe -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+                    '-File', ('"{0}"' -f $widget), '-DataDir', ('"{0}"' -f $Data), '-Lang', 'en'
+            }
+            finally { foreach ($n in $saved.Keys) { [Environment]::SetEnvironmentVariable($n, $saved[$n]) } }
+        }
+        function Wait-ForFile([string]$Path, [int]$Seconds = 10) {
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            while ((Get-Date) -lt $deadline) { if (Test-Path -LiteralPath $Path) { return $true }; Start-Sleep -Milliseconds 250 }
+            return $false
+        }
+        $CTRL = [byte]0x11
+        $ALT = [byte]0x12
+    }
+    It 'approves, denies and toggles do not disturb with the configured keys' {
+        $data = Join-Path ([IO.Path]::GetTempPath()) ('ccw-widget-' + [guid]::NewGuid().ToString('N'))
+        $queue = Join-Path $data 'queue'
+        New-Item -ItemType Directory -Path $queue | Out-Null
+        $proc = Start-HotkeyWidget $data $true
+        try {
+            (Wait-ForFile (Join-Path $data 'widget.json') 30) | Should -BeTrue
+            Start-Sleep -Seconds 3
+            New-PermissionRequestFile $queue 'r1'
+            Start-Sleep -Milliseconds 1800
+            [CcwTest.Keys]::Chord([byte[]]@($CTRL, $ALT, [byte]0x7C))
+            (Wait-ForFile (Join-Path $queue 'res-r1.json')) | Should -BeTrue
+            ([IO.File]::ReadAllText((Join-Path $queue 'res-r1.json')) | ConvertFrom-Json).decision | Should -BeExactly 'allow'
+
+            New-PermissionRequestFile $queue 'r2'
+            Start-Sleep -Milliseconds 1800
+            [CcwTest.Keys]::Chord([byte[]]@($CTRL, $ALT, [byte]0x7D))
+            (Wait-ForFile (Join-Path $queue 'res-r2.json')) | Should -BeTrue
+            ([IO.File]::ReadAllText((Join-Path $queue 'res-r2.json')) | ConvertFrom-Json).decision | Should -BeExactly 'deny'
+
+            [CcwTest.Keys]::Chord([byte[]]@($CTRL, $ALT, [byte]0x7E))
+            (Wait-ForFile (Join-Path $data 'dnd.flag')) | Should -BeTrue
+            Join-Path $data 'widget.log' | Should -Not -Exist
+        }
+        finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            [void]$proc.WaitForExit(5000)
+            Remove-Item -LiteralPath $data -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It 'does nothing when the hotkeys are not turned on' {
+        $data = Join-Path ([IO.Path]::GetTempPath()) ('ccw-widget-' + [guid]::NewGuid().ToString('N'))
+        $queue = Join-Path $data 'queue'
+        New-Item -ItemType Directory -Path $queue | Out-Null
+        $proc = Start-HotkeyWidget $data $false
+        try {
+            (Wait-ForFile (Join-Path $data 'widget.json') 30) | Should -BeTrue
+            Start-Sleep -Seconds 3
+            New-PermissionRequestFile $queue 'r1'
+            Start-Sleep -Milliseconds 1800
+            [CcwTest.Keys]::Chord([byte[]]@($CTRL, $ALT, [byte]0x7C))
+            [CcwTest.Keys]::Chord([byte[]]@($CTRL, $ALT, [byte]0x7E))
+            Start-Sleep -Seconds 3
+            Join-Path $queue 'res-r1.json' | Should -Not -Exist
+            Join-Path $data 'dnd.flag' | Should -Not -Exist
+        }
+        finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            [void]$proc.WaitForExit(5000)
+            Remove-Item -LiteralPath $data -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It 'does not approve when there is no permission card on screen' {
+        $data = Join-Path ([IO.Path]::GetTempPath()) ('ccw-widget-' + [guid]::NewGuid().ToString('N'))
+        $queue = Join-Path $data 'queue'
+        New-Item -ItemType Directory -Path $queue | Out-Null
+        $proc = Start-HotkeyWidget $data $true
+        try {
+            (Wait-ForFile (Join-Path $data 'widget.json') 30) | Should -BeTrue
+            Start-Sleep -Seconds 3
+            [CcwTest.Keys]::Chord([byte[]]@($CTRL, $ALT, [byte]0x7C))
+            Start-Sleep -Seconds 2
+            $proc.HasExited | Should -BeFalse
+            @(Get-ChildItem -LiteralPath $queue -Filter 'res-*.json').Count | Should -Be 0
+            Join-Path $data 'widget.log' | Should -Not -Exist
         }
         finally {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue

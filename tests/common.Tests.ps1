@@ -410,3 +410,94 @@ Describe 'Format-SessionLine' {
         $line | Should -BeExactly (('x' * 38) + '...')
     }
 }
+
+Describe 'Get-DiffLines' {
+    BeforeAll {
+        function New-Edit([string]$Old, [string]$New) { @{ kind = 'edit'; edits = @(@{ old = $Old; new = $New }) } }
+    }
+    It 'shows only the lines that changed, without the equal start and end' {
+        $lines = @(Get-DiffLines (New-Edit "a`nb`nc" "a`nX`nc"))
+        $lines.Count | Should -Be 2
+        $lines[0].kind | Should -BeExactly 'del'
+        $lines[0].text | Should -BeExactly 'b'
+        $lines[1].kind | Should -BeExactly 'add'
+        $lines[1].text | Should -BeExactly 'X'
+    }
+    It 'shows every line when nothing is in common' {
+        $lines = @(Get-DiffLines (New-Edit "x`ny" "z"))
+        ($lines | ForEach-Object { $_.kind + ':' + $_.text }) -join ',' | Should -BeExactly 'del:x,del:y,add:z'
+    }
+    It 'treats an empty old text as a pure addition' {
+        $lines = @(Get-DiffLines (New-Edit '' "new1`nnew2"))
+        ($lines | ForEach-Object { $_.kind + ':' + $_.text }) -join ',' | Should -BeExactly 'add:new1,add:new2'
+    }
+    It 'shows nothing when the edit changes nothing' {
+        @(Get-DiffLines (New-Edit "same`nlines" "same`nlines")).Count | Should -Be 0
+    }
+    It 'handles Windows line endings' {
+        $lines = @(Get-DiffLines (New-Edit "a`r`nb" "a`r`nc"))
+        ($lines | ForEach-Object { $_.kind + ':' + $_.text }) -join ',' | Should -BeExactly 'del:b,add:c'
+    }
+    It 'shows a written file as added lines' {
+        $lines = @(Get-DiffLines @{ kind = 'write'; content = "one`ntwo`nthree" })
+        ($lines | ForEach-Object { $_.kind + ':' + $_.text }) -join ',' | Should -BeExactly 'add:one,add:two,add:three'
+    }
+    It 'keeps 14 lines and says how many were left out' {
+        $content = (1..20 | ForEach-Object { "line $_" }) -join "`n"
+        $lines = @(Get-DiffLines @{ kind = 'write'; content = $content })
+        $lines.Count | Should -Be 15
+        @($lines | Where-Object { $_.kind -eq 'add' }).Count | Should -Be 14
+        $lines[14].kind | Should -BeExactly 'more'
+        $lines[14].text | Should -BeExactly '6'
+    }
+    It 'follows several edits in order' {
+        $change = @{ kind = 'edit'; edits = @(@{ old = 'a'; new = 'b' }, @{ old = 'c'; new = 'd' }) }
+        $lines = @(Get-DiffLines $change)
+        ($lines | ForEach-Object { $_.kind + ':' + $_.text }) -join ',' | Should -BeExactly 'del:a,add:b,del:c,add:d'
+    }
+    It 'returns nothing without a change' {
+        @(Get-DiffLines $null).Count | Should -Be 0
+        @(Get-DiffLines @{ kind = 'edit'; edits = @() }).Count | Should -Be 0
+        @(Get-DiffLines @{ kind = 'write' }).Count | Should -Be 0
+    }
+}
+
+Describe 'ConvertTo-Hotkey' {
+    It 'parses <text>' -ForEach @(
+        @{ text = 'Ctrl+Alt+Y'; mod = 0x4003; vk = 0x59 }
+        @{ text = 'ctrl + alt + y'; mod = 0x4003; vk = 0x59 }
+        @{ text = 'Shift+Win+F13'; mod = 0x400C; vk = 0x7C }
+        @{ text = 'Ctrl+5'; mod = 0x4002; vk = 0x35 }
+        @{ text = 'Alt+F1'; mod = 0x4001; vk = 0x70 }
+    ) {
+        $hk = ConvertTo-Hotkey $text
+        $hk.mod | Should -Be $mod
+        $hk.vk | Should -Be $vk
+    }
+    It 'rejects <text>' -ForEach @(
+        @{ text = '' }
+        @{ text = 'Y' }
+        @{ text = 'Ctrl+Alt' }
+        @{ text = 'Ctrl+Alt+Yes' }
+        @{ text = 'Ctrl+Y+N' }
+        @{ text = 'Ctrl+F25' }
+        @{ text = 'Hyper+Y' }
+    ) {
+        ConvertTo-Hotkey $text | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Format-RuleText' {
+    It 'writes a rule object as Tool(content) or just Tool' {
+        Format-RuleText ([pscustomobject]@{ toolName = 'Bash'; ruleContent = 'npm test *' }) | Should -BeExactly 'Bash(npm test *)'
+        Format-RuleText ([pscustomobject]@{ toolName = 'Read' }) | Should -BeExactly 'Read'
+        Format-RuleText ([pscustomobject]@{ toolName = 'Read'; ruleContent = '' }) | Should -BeExactly 'Read'
+    }
+    It 'keeps a rule that is already a string' {
+        Format-RuleText 'Bash(git *)' | Should -BeExactly 'Bash(git *)'
+    }
+    It 'never throws on odd input' {
+        { Format-RuleText $null; Format-RuleText 42; Format-RuleText @(1, 2); Format-RuleText ([pscustomobject]@{ other = 1 }) } | Should -Not -Throw
+        Format-RuleText $null | Should -BeExactly ''
+    }
+}
