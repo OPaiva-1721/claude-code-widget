@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.0 (2026-10-08)
+
+- **Diff on the card.** The permission card of an `Edit`, `MultiEdit` or `Write` shows what changes: removed lines in red, added lines in green (up to 14 lines).
+- **Always allow.** The permission card offers buttons that approve and also save one of the rules Claude Code itself suggests, showing the rule and where it is saved (this session, this project, all projects...). Only rules that allow, the modes below "bypass permissions" and folders are offered; the widget never saves anything Claude Code did not suggest.
+- **Global hotkeys (off by default).** Set `CLAUDE_WIDGET_HOTKEYS=1` to approve (`Ctrl+Alt+Y`), deny (`Ctrl+Alt+N`) and toggle "do not disturb" (`Ctrl+Alt+D`) from any window. Change the keys with `CLAUDE_WIDGET_KEY_APPROVE`, `CLAUDE_WIDGET_KEY_DENY` and `CLAUDE_WIDGET_KEY_DND`.
+
 ## 2.2.1 (2026-10-08)
 
 - **No ghost tray icons after an update.** When a plugin update replaces the running widget, the hook now asks the old one to close itself (it removes its own tray icon) and only kills it if it has not left after 4 seconds. Before, every update left a dead icon in the tray until you hovered over it.

@@ -18,6 +18,7 @@ Quando não há nada para mostrar, ele vira uma pílula pequena, que dá para ar
   <tr>
     <td valign="top">
       <img src="docs/images/pt/permission.png" width="420" alt="Cartão de pedido de permissão com os botões Aprovar, Negar e Decidir no VS Code"><br>
+      <img src="docs/images/pt/edit.png" width="420" alt="Cartão de permissão de um Edit com o diff e dois botões Sempre permitir"><br>
       <img src="docs/images/pt/done.png" width="370" alt="Aviso de terminou com o começo da resposta do Claude e o botão Ir para o VS Code">
     </td>
     <td valign="top">
@@ -82,7 +83,7 @@ O widget volta a abrir no canto padrão, porque o nome novo vem com uma pasta de
 
 | O que aparece | O que fazer |
 | --- | --- |
-| Ponto laranja piscando, **pedido de permissão** | **Aprovar** executa a ação. **Negar** bloqueia e avisa o Claude que você negou. **Decidir no VS Code** mostra o pedido normal no VS Code. |
+| Ponto laranja piscando, **pedido de permissão** | **Aprovar** executa a ação. **Negar** bloqueia e avisa o Claude que você negou. **Decidir no VS Code** mostra o pedido normal no VS Code. Num **Edit** ou **Write**, o cartão mostra o diff. **Sempre permitir...** aprova e grava a regra do botão (nesta sessão, neste projeto ou em todos os projetos); só oferece regras que o próprio Claude Code sugeriu. |
 | Ponto azul piscando, **pergunta** | Marque uma opção (ou várias, quando a pergunta permite) e clique em **Responder**. **Outra resposta** deixa você digitar; o Enter também envia. **Responder no VS Code** devolve a pergunta para o VS Code. |
 | ✓ verde, **terminou** | **Ir para o VS Code** ou **Ir para o terminal** traz para a frente a janela daquela sessão. **Ok** fecha o aviso. |
 | Pílula parada, **N trabalhando** | Clique para listar as sessões que estão trabalhando (projeto, título, tempo). Clique de novo para fechar a lista. |
@@ -112,6 +113,10 @@ Defina estas variáveis de ambiente no bloco `env` do `~/.claude/settings.json`:
 | --- | --- | --- |
 | `CLAUDE_WIDGET_LANG` | idioma do Windows | `pt` ou `en`. Qualquer outro valor usa inglês. |
 | `CLAUDE_WIDGET_AWAY_SECS` | `120` | Segundos sem uso de mouse nem teclado até os pedidos deixarem de passar pelo widget. |
+| `CLAUDE_WIDGET_HOTKEYS` | desligado | `1` liga os atalhos globais. Enquanto ligados, essas combinações deixam de funcionar nos outros programas, e Aprovar/Negar agem no cartão de permissão que estiver na tela, sem você olhar. |
+| `CLAUDE_WIDGET_KEY_APPROVE` | `Ctrl+Alt+Y` | Atalho que aprova o cartão de permissão na tela. |
+| `CLAUDE_WIDGET_KEY_DENY` | `Ctrl+Alt+N` | Atalho que nega. |
+| `CLAUDE_WIDGET_KEY_DND` | `Ctrl+Alt+D` | Atalho que liga e desliga o "não perturbe". |
 
 ```json
 {
@@ -136,6 +141,7 @@ Claude Code ──hook──▶ hook.ps1 ──queue\req-<id>.json──▶ widg
 ## Segurança
 
 - Aprovar no widget é o mesmo que clicar em **Allow** no VS Code. O widget mostra o comando ou o caminho do arquivo inteiro antes de você decidir.
+- **Sempre permitir** grava uma regra permanente: o botão mostra a regra e onde ela vai, e o widget só grava regras que o próprio Claude Code sugeriu para aquele pedido (nunca regras que apagam as suas, nem "bypass permissions").
 - Tudo fica na sua máquina. O widget não acessa a rede e não coleta nenhum dado. Os únicos dados são os arquivos na pasta de dados do plugin, dentro do seu perfil de usuário.
 - Pedidos e respostas são arquivos comuns que só o seu usuário do Windows pode gravar. Um programa rodando como você conseguiria gravar uma resposta, mas um programa assim já conseguiria fazer qualquer coisa que você faz.
 - Aprovação de plano e tudo o que você não responder sempre voltam para a confirmação normal do Claude Code.

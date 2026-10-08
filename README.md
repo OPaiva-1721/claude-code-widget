@@ -18,6 +18,7 @@ When there is nothing to show, it shrinks to a small pill that you can drag anyw
   <tr>
     <td valign="top">
       <img src="docs/images/en/permission.png" width="420" alt="Permission request card with Approve, Deny and Decide in VS Code buttons"><br>
+      <img src="docs/images/en/edit.png" width="420" alt="Permission card of an Edit with the diff and two Always allow buttons"><br>
       <img src="docs/images/en/done.png" width="370" alt="Finished notice with the start of Claude's reply and a Go to VS Code button">
     </td>
     <td valign="top">
@@ -82,7 +83,7 @@ The widget starts in the default corner again, because the new name comes with a
 
 | What you see | What to do |
 | --- | --- |
-| Orange pulsing dot, **permission request** | **Approve** runs the action. **Deny** blocks it and tells Claude you denied it. **Decide in VS Code** shows the normal prompt in VS Code. |
+| Orange pulsing dot, **permission request** | **Approve** runs the action. **Deny** blocks it and tells Claude you denied it. **Decide in VS Code** shows the normal prompt in VS Code. For an **Edit** or **Write** the card shows the diff. **Always allow...** approves and saves the rule shown on the button (this session, this project or all projects); it only offers rules Claude Code itself suggested. |
 | Blue pulsing dot, **question** | Pick an option (or several, when the question allows it), then **Answer**. **Other answer** lets you type; Enter also sends it. **Answer in VS Code** hands the question back to VS Code. |
 | Green check, **finished** | **Go to VS Code** or **Go to terminal** brings that session's window to the front. **OK** dismisses the notice. |
 | Idle pill, **N working** | Click it to list the working sessions (project, title, time). Click again to close the list. |
@@ -112,6 +113,10 @@ Set these environment variables in the `env` block of `~/.claude/settings.json`:
 | --- | --- | --- |
 | `CLAUDE_WIDGET_LANG` | Windows display language | `pt` or `en`. Any other value falls back to English. |
 | `CLAUDE_WIDGET_AWAY_SECS` | `120` | Seconds without mouse or keyboard input before requests skip the widget. |
+| `CLAUDE_WIDGET_HOTKEYS` | off | `1` turns on the global hotkeys. While on, those key combinations stop working in other programs, and Approve/Deny act on the permission card on screen without you looking at it. |
+| `CLAUDE_WIDGET_KEY_APPROVE` | `Ctrl+Alt+Y` | Hotkey that approves the permission card on screen. |
+| `CLAUDE_WIDGET_KEY_DENY` | `Ctrl+Alt+N` | Hotkey that denies it. |
+| `CLAUDE_WIDGET_KEY_DND` | `Ctrl+Alt+D` | Hotkey that turns "do not disturb" on and off. |
 
 ```json
 {
@@ -136,6 +141,7 @@ Claude Code ──hook──▶ hook.ps1 ──queue\req-<id>.json──▶ widg
 ## Security
 
 - Approving in the widget is the same as clicking **Allow** in VS Code. The widget shows the full command or file path before you decide.
+- **Always allow** saves a permanent rule: the button shows the rule and where it goes, and the widget only saves rules Claude Code itself suggested for that request (never rules that remove yours, nor "bypass permissions").
 - Everything stays on your machine. There are no network calls and no telemetry. The only data are files in the plugin data folder, inside your user profile.
 - Requests and answers are plain files that only your Windows user can write. A program running as you could write an answer file, but such a program could already do anything you can.
 - Plan approvals and anything you don't answer always fall back to Claude Code's own prompt.
