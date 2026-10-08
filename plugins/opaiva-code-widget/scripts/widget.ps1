@@ -240,6 +240,11 @@ namespace ClaudeWidget {
                    TextWrapping="Wrap" MaxHeight="160" VerticalScrollBarVisibility="Auto"
                    SelectionBrush="#D97757"/>
         </Border>
+        <Border x:Name="ChangeBox" CornerRadius="8" Background="#141417" BorderBrush="#2C2C33" BorderThickness="1" Margin="0,8,0,0" Visibility="Collapsed">
+          <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Focusable="False">
+            <StackPanel x:Name="ChangeLines" Margin="0,4,0,4"/>
+          </ScrollViewer>
+        </Border>
 
         <TextBlock x:Name="Cwd" Foreground="#6E6E78" FontSize="11" Margin="2,8,0,0" TextTrimming="CharacterEllipsis"/>
 
@@ -252,6 +257,7 @@ namespace ClaudeWidget {
           <Button x:Name="BtnVs" Style="{StaticResource Btn}"
                   Background="#2A2A30" BorderBrush="#3A3A42" Foreground="#C8C8D0" DockPanel.Dock="Right"/>
         </DockPanel>
+        <WrapPanel x:Name="AlwaysList" Margin="0,10,0,0" Visibility="Collapsed"/>
       </StackPanel>
 
       <StackPanel x:Name="QPanel" Width="460" Margin="20,16,20,18" Visibility="Collapsed">
@@ -321,7 +327,7 @@ namespace ClaudeWidget {
 
     $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
     $ui = @{}
-    foreach ($n in 'Card', 'IdlePanel', 'IdleText', 'SessionsList', 'ReqPanel', 'ReqTitle', 'QPanel', 'QTitle', 'DonePanel', 'DoneTitle',
+    foreach ($n in 'Card', 'IdlePanel', 'IdleText', 'SessionsList', 'ChangeBox', 'ChangeLines', 'AlwaysList', 'ReqPanel', 'ReqTitle', 'QPanel', 'QTitle', 'DonePanel', 'DoneTitle',
         'ReqDot', 'Countdown', 'Tool', 'ProjectChip', 'Project', 'QueueChip', 'QueueText', 'Desc', 'Detail', 'Cwd',
         'BtnApprove', 'BtnDeny', 'BtnVs', 'QCountdown', 'QDot', 'QProjectChip', 'QProject', 'QQueueChip', 'QQueueText',
         'QList', 'BtnAnswer', 'BtnQVs', 'DoneAgo', 'DoneProjectChip', 'DoneProject', 'DoneMoreChip', 'DoneMoreText',
@@ -501,6 +507,72 @@ namespace ClaudeWidget {
     function Get-Done { Get-DoneNotices $Queue $script:doneCache $DoneMaxAgeMs }
 
     # ---------------- Permission request ----------------
+    # The diff of an Edit/Write under the detail box: red removed lines, green added lines
+    function Set-ChangeView($change) {
+        $ui.ChangeLines.Children.Clear()
+        $lines = @(Get-DiffLines $change)
+        if ($lines.Count -eq 0) { $ui.ChangeBox.Visibility = 'Collapsed'; return }
+        foreach ($l in $lines) {
+            $tb = New-Object System.Windows.Controls.TextBlock
+            $tb.FontFamily = New-Object System.Windows.Media.FontFamily 'Cascadia Mono, Consolas'
+            $tb.FontSize = 12
+            $tb.Padding = '10,1,10,1'
+            $tb.TextWrapping = 'NoWrap'
+            if ($l.kind -eq 'del') { $tb.Text = '- ' + $l.text; $tb.Background = Get-Brush '#3A1E1E'; $tb.Foreground = Get-Brush '#F29090' }
+            elseif ($l.kind -eq 'add') { $tb.Text = '+ ' + $l.text; $tb.Background = Get-Brush '#1E3A2A'; $tb.Foreground = Get-Brush '#7FD3A0' }
+            else { $tb.Text = $S.diffMore -f $l.text; $tb.Foreground = Get-Brush '#7E7E88' }
+            [void]$ui.ChangeLines.Children.Add($tb)
+        }
+        $ui.ChangeBox.Visibility = 'Visible'
+    }
+    function Get-DestinationText([string]$dest) {
+        switch ($dest) {
+            'session' { $S.destSession }
+            'localSettings' { $S.destLocal }
+            'projectSettings' { $S.destProject }
+            'userSettings' { $S.destUser }
+            default { $dest }
+        }
+    }
+    # "Always allow" buttons: one per suggestion Claude Code made (at most 3), showing the rule and where it is saved
+    function Set-AlwaysButtons($r) {
+        $ui.AlwaysList.Children.Clear()
+        $shown = 0
+        foreach ($sg in @($r.suggestions)) {
+            if (-not $sg -or $shown -ge 3) { continue }
+            $what = switch ([string]$sg.type) {
+                'addRules' {
+                    $rules = @($sg.rules)
+                    $S.alwaysRule -f ($rules[0] + $(if ($rules.Count -gt 1) { ' ' + ($S.alwaysMore -f ($rules.Count - 1)) } else { '' }))
+                }
+                'setMode' {
+                    $key = 'mode' + ([string]$sg.mode).Substring(0, 1).ToUpperInvariant() + ([string]$sg.mode).Substring(1)
+                    $S.alwaysMode -f $(if ($S.PSObject.Properties[$key]) { $S.$key } else { [string]$sg.mode })
+                }
+                'addDirectories' { $S.alwaysDir -f @($sg.directories)[0] }
+                default { '' }
+            }
+            if (-not $what) { continue }
+            $full = $what + '  ' + [char]0x00B7 + '  ' + (Get-DestinationText ([string]$sg.destination))
+            $btn = New-Object System.Windows.Controls.Button
+            $btn.Style = $win.FindResource('Btn')
+            $btn.Content = $(if ($full.Length -gt 60) { $full.Substring(0, 57) + '...' } else { $full })
+            $btn.ToolTip = $full
+            $btn.Height = 28
+            $btn.FontSize = 12
+            $btn.FontWeight = [System.Windows.FontWeights]::Normal
+            $btn.Padding = '12,0'
+            $btn.Margin = '0,0,8,6'
+            $btn.Background = Get-Brush '#2A2A30'
+            $btn.BorderBrush = Get-Brush '#3A3A42'
+            $btn.Foreground = Get-Brush '#C8C8D0'
+            $btn.Tag = [int]$sg.index
+            $btn.Add_Click({ param($src, $e) Send-Response 'allowAlways' @{ index = [int]$src.Tag } })
+            [void]$ui.AlwaysList.Children.Add($btn)
+            $shown++
+        }
+        $ui.AlwaysList.Visibility = if ($shown -gt 0) { 'Visible' } else { 'Collapsed' }
+    }
     function Show-Permission($r) {
         $ui.Tool.Text = [string]$r.tool
         Set-ProjectChip $ui.ProjectChip $ui.Project $r
@@ -508,6 +580,8 @@ namespace ClaudeWidget {
         $ui.Desc.Text = [string]$r.description
         $ui.Detail.Text = [string]$r.detail
         $ui.Detail.ScrollToHome()
+        Set-ChangeView $r.change
+        Set-AlwaysButtons $r
         Set-Panel 'ReqPanel'
         Invoke-Attention $r.id { [System.Media.SystemSounds]::Asterisk.Play() }
     }
@@ -870,11 +944,11 @@ namespace ClaudeWidget {
     # Keeps a double click from also answering the next item in the queue
     function Test-ClickTooSoon { return ((Get-NowMs) - $script:shownAt) -lt 700 }
 
-    function Send-Response($decision) {
+    function Send-Response($decision, [hashtable]$extra = @{}) {
         $r = $script:current
         if (-not $r -or (Test-ClickTooSoon)) { return }
         $res = Join-Path $Queue "res-$($r.id).json"
-        if (-not (Test-Path -LiteralPath $res)) { Write-JsonAtomic $res @{ decision = $decision } }
+        if (-not (Test-Path -LiteralPath $res)) { Write-JsonAtomic $res (@{ decision = $decision } + $extra) }
         $script:current = $null
         Update-View
     }
@@ -1073,6 +1147,14 @@ namespace ClaudeWidget {
         $p | Add-Member -NotePropertyName timeout -NotePropertyValue 300 -Force
         Show-Request $p 2
         Save-Png $frame (Join-Path $OutDir 'permission.png')
+
+        $e = $sample.edit
+        $e | Add-Member -NotePropertyName id -NotePropertyValue 'sample-edit' -Force
+        $e | Add-Member -NotePropertyName kind -NotePropertyValue 'permission' -Force
+        $e | Add-Member -NotePropertyName created -NotePropertyValue ($now - 41000) -Force
+        $e | Add-Member -NotePropertyName timeout -NotePropertyValue 300 -Force
+        Show-Request $e 1
+        Save-Png $frame (Join-Path $OutDir 'edit.png')
 
         $q = $sample.question
         $q | Add-Member -NotePropertyName id -NotePropertyValue 'sample-question' -Force

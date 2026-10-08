@@ -16,22 +16,45 @@
           "header": "Database",
           "multiSelect": false,
           "options": [
-            { "label": "PostgreSQL", "description": "Relational, already used by the other services" },
-            { "label": "SQLite", "description": "A single file, simplest to run locally" }
-    ]
+            {
+              "label": "PostgreSQL",
+              "description": "Relational, already used by the other services"
+            },
+            {
+              "label": "SQLite",
+              "description": "A single file, simplest to run locally"
+            }
+          ]
         },
         {
           "question": "Which checks should run before deploy?",
           "header": "Checks",
           "multiSelect": true,
           "options": [
-            { "label": "Unit tests", "description": "" },
-            { "label": "Lint", "description": "" },
-            { "label": "Type check", "description": "" }
-    ]
+            {
+              "label": "Unit tests",
+              "description": ""
+            },
+            {
+              "label": "Lint",
+              "description": ""
+            },
+            {
+              "label": "Type check",
+              "description": ""
+            }
+          ]
         }
-    ],
-      "selected": [["PostgreSQL"], ["Unit tests", "Lint"]]
+      ],
+      "selected": [
+        [
+          "PostgreSQL"
+        ],
+        [
+          "Unit tests",
+          "Lint"
+        ]
+      ]
     },
     "done": {
       "title": "Login form validation",
@@ -39,10 +62,61 @@
       "message": "Done: the login page now validates the e-mail format before submitting. I added 6 unit tests and all of them pass."
     },
     "sessions": [
-      { "cwd": "C:\\dev\\my-app", "title": "Login form validation", "waiting": true, "minutes": 2 },
-      { "cwd": "C:\\dev\\billing", "title": "New billing service", "waiting": false, "minutes": 7 },
-      { "cwd": "C:\\dev\\docs", "title": "", "waiting": false, "minutes": 14 }
-    ]
+      {
+        "cwd": "C:\\dev\\my-app",
+        "title": "Login form validation",
+        "waiting": true,
+        "minutes": 2
+      },
+      {
+        "cwd": "C:\\dev\\billing",
+        "title": "New billing service",
+        "waiting": false,
+        "minutes": 7
+      },
+      {
+        "cwd": "C:\\dev\\docs",
+        "title": "",
+        "waiting": false,
+        "minutes": 14
+      }
+    ],
+    "edit": {
+      "tool": "Edit",
+      "description": "Raise the retry limit",
+      "detail": "C:\\dev\\my-app\\src\\client.js",
+      "cwd": "C:\\dev\\my-app",
+      "title": "Login form validation",
+      "change": {
+        "kind": "edit",
+        "edits": [
+          {
+            "old": "const retries = 3;\nconst delay = 100;\nconst timeout = 5000;",
+            "new": "const retries = 5;\nconst delay = 250;\nconst timeout = 5000;"
+          }
+        ]
+      },
+      "suggestions": [
+        {
+          "index": 0,
+          "type": "addRules",
+          "rules": [
+            "Edit(src/**)"
+          ],
+          "destination": "session",
+          "mode": "",
+          "directories": []
+        },
+        {
+          "index": 1,
+          "type": "setMode",
+          "rules": [],
+          "destination": "session",
+          "mode": "acceptEdits",
+          "directories": []
+        }
+      ]
+    }
   },
   "pt": {
     "permission": {
@@ -61,22 +135,45 @@
           "header": "Banco",
           "multiSelect": false,
           "options": [
-            { "label": "PostgreSQL", "description": "Relacional, já usado pelos outros serviços" },
-            { "label": "SQLite", "description": "Um arquivo só, mais simples de rodar local" }
-    ]
+            {
+              "label": "PostgreSQL",
+              "description": "Relacional, já usado pelos outros serviços"
+            },
+            {
+              "label": "SQLite",
+              "description": "Um arquivo só, mais simples de rodar local"
+            }
+          ]
         },
         {
           "question": "Quais verificações rodar antes do deploy?",
           "header": "Verificações",
           "multiSelect": true,
           "options": [
-            { "label": "Testes unitários", "description": "" },
-            { "label": "Lint", "description": "" },
-            { "label": "Checagem de tipos", "description": "" }
-    ]
+            {
+              "label": "Testes unitários",
+              "description": ""
+            },
+            {
+              "label": "Lint",
+              "description": ""
+            },
+            {
+              "label": "Checagem de tipos",
+              "description": ""
+            }
+          ]
         }
-    ],
-      "selected": [["PostgreSQL"], ["Testes unitários", "Lint"]]
+      ],
+      "selected": [
+        [
+          "PostgreSQL"
+        ],
+        [
+          "Testes unitários",
+          "Lint"
+        ]
+      ]
     },
     "done": {
       "title": "Validação do login",
@@ -84,9 +181,60 @@
       "message": "Pronto: a tela de login agora valida o formato do e-mail antes de enviar. Adicionei 6 testes unitários e todos passam."
     },
     "sessions": [
-      { "cwd": "C:\\dev\\meu-app", "title": "Validação do login", "waiting": true, "minutes": 2 },
-      { "cwd": "C:\\dev\\cobranca", "title": "Serviço de cobrança", "waiting": false, "minutes": 7 },
-      { "cwd": "C:\\dev\\docs", "title": "", "waiting": false, "minutes": 14 }
-    ]
+      {
+        "cwd": "C:\\dev\\meu-app",
+        "title": "Validação do login",
+        "waiting": true,
+        "minutes": 2
+      },
+      {
+        "cwd": "C:\\dev\\cobranca",
+        "title": "Serviço de cobrança",
+        "waiting": false,
+        "minutes": 7
+      },
+      {
+        "cwd": "C:\\dev\\docs",
+        "title": "",
+        "waiting": false,
+        "minutes": 14
+      }
+    ],
+    "edit": {
+      "tool": "Edit",
+      "description": "Aumentar o limite de tentativas",
+      "detail": "C:\\dev\\meu-app\\src\\client.js",
+      "cwd": "C:\\dev\\meu-app",
+      "title": "Validação do login",
+      "change": {
+        "kind": "edit",
+        "edits": [
+          {
+            "old": "const retries = 3;\nconst delay = 100;\nconst timeout = 5000;",
+            "new": "const retries = 5;\nconst delay = 250;\nconst timeout = 5000;"
+          }
+        ]
+      },
+      "suggestions": [
+        {
+          "index": 0,
+          "type": "addRules",
+          "rules": [
+            "Edit(src/**)"
+          ],
+          "destination": "session",
+          "mode": "",
+          "directories": []
+        },
+        {
+          "index": 1,
+          "type": "setMode",
+          "rules": [],
+          "destination": "session",
+          "mode": "acceptEdits",
+          "directories": []
+        }
+      ]
+    }
   }
 }
