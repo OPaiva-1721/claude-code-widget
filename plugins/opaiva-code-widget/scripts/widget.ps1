@@ -215,7 +215,7 @@ namespace ClaudeWidget {
       <StackPanel x:Name="IdlePanel" Orientation="Vertical" Margin="14,9,16,9" Background="Transparent">
         <StackPanel Orientation="Horizontal">
           <Ellipse Width="8" Height="8" Fill="#5FB98A" VerticalAlignment="Center" Margin="0,0,9,0"/>
-          <TextBlock Text="Claude Code" Foreground="#E8E8EC" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          <TextBlock x:Name="IdleTitle" Text="Claude Code" Foreground="#E8E8EC" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
           <TextBlock x:Name="IdleText" Foreground="#7E7E88" FontSize="12" VerticalAlignment="Center"/>
         </StackPanel>
         <StackPanel x:Name="SessionsList" Margin="0,8,0,0" Visibility="Collapsed"/>
@@ -336,7 +336,7 @@ namespace ClaudeWidget {
 
     $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
     $ui = @{}
-    foreach ($n in 'Card', 'IdlePanel', 'IdleText', 'SessionsList', 'ChangeBox', 'ChangeLines', 'AlwaysList', 'ReqPanel', 'ReqTitle', 'QPanel', 'QTitle', 'DonePanel', 'DoneTitle',
+    foreach ($n in 'Card', 'IdlePanel', 'IdleTitle', 'IdleText', 'SessionsList', 'ChangeBox', 'ChangeLines', 'AlwaysList', 'ReqPanel', 'ReqTitle', 'QPanel', 'QTitle', 'DonePanel', 'DoneTitle',
         'ReqDot', 'Countdown', 'Tool', 'ProjectChip', 'Project', 'QueueChip', 'QueueText', 'Desc', 'Detail', 'Cwd',
         'BtnApprove', 'BtnDeny', 'BtnVs', 'QCountdown', 'QDot', 'QProjectChip', 'QProject', 'QQueueChip', 'QQueueText',
         'QList', 'BtnAnswer', 'BtnQVs', 'DoneAgo', 'DoneProjectChip', 'DoneProject', 'DoneMoreChip', 'DoneMoreText',
@@ -872,6 +872,7 @@ namespace ClaudeWidget {
         $rows = @($rows)
         $script:sessionRows = $rows
         $ui.IdleText.Text = $Sep + $(if ($rows.Count -eq 0) { $S.idle } elseif ($rows.Count -eq 1) { $S.workingOne } else { $S.workingMany -f $rows.Count })
+        Update-IdleLook
         if ($rows.Count -eq 0) { $script:sessionsOpen = $false }
         $list = $ui.SessionsList
         $list.Children.Clear()
@@ -1062,12 +1063,76 @@ namespace ClaudeWidget {
         }
         $win.Close()
     }
+    function Set-Opacity { $win.Opacity = [double]$script:prefs.opacity }
+    function Set-Scale {
+        $sc = [double]$script:prefs.scale
+        $ui.Card.LayoutTransform = New-Object System.Windows.Media.ScaleTransform $sc, $sc
+    }
+    # The idle pill's tooltip carries the status text when the pill is minimal (the text itself is hidden)
+    function Update-IdleLook {
+        $min = [bool]$script:prefs.minimal
+        $v = if ($min) { 'Collapsed' } else { 'Visible' }
+        $ui.IdleTitle.Visibility = $v
+        $ui.IdleText.Visibility = $v
+        $status = if ($ui.IdleText.Text.Length -gt $Sep.Length) { $ui.IdleText.Text.Substring($Sep.Length) } else { '' }
+        $ui.IdlePanel.ToolTip = if ($min -and $status) { $status + [Environment]::NewLine + $S.idleTip } else { $S.idleTip }
+    }
+    function Set-Minimal { Update-IdleLook }
+    # Right-click menu: each submenu lists fixed choices with the current one checked
+    $script:prefItems = New-Object System.Collections.ArrayList
+    function Sync-MenuChecks {
+        foreach ($e in $script:prefItems) { $e.item.IsChecked = ($script:prefs[$e.key] -eq $e.value) }
+    }
+    function Set-Pref([string]$key, $value) {
+        $script:prefs[$key] = $value
+        switch ($key) {
+            'theme' { Set-Theme (Resolve-Theme $script:prefs.theme (Get-WindowsLightTheme)) }
+            'opacity' { Set-Opacity }
+            'scale' { Set-Scale }
+            'minimal' { Set-Minimal }
+        }
+        [void](Save-Prefs $Data $script:prefs)
+        Sync-MenuChecks
+    }
+    function Add-ChoiceMenu($parent, [string]$header, $choices) {
+        $sub = New-Object System.Windows.Controls.MenuItem
+        $sub.Header = $header
+        foreach ($c in $choices) {
+            $item = New-Object System.Windows.Controls.MenuItem
+            $item.Header = $c.label
+            $item.Tag = @{ key = $c.key; value = $c.value }
+            $item.Add_Click({ param($src, $e) Set-Pref $src.Tag.key $src.Tag.value })
+            [void]$script:prefItems.Add(@{ item = $item; key = $c.key; value = $c.value })
+            [void]$sub.Items.Add($item)
+        }
+        [void]$parent.Items.Add($sub)
+    }
     $menu = New-Object System.Windows.Controls.ContextMenu
+    Add-ChoiceMenu $menu $S.menuTheme @(
+        @{ label = $S.themeDark; key = 'theme'; value = 'dark' }
+        @{ label = $S.themeLight; key = 'theme'; value = 'light' }
+        @{ label = $S.themeAuto; key = 'theme'; value = 'auto' })
+    Add-ChoiceMenu $menu $S.menuOpacity @(foreach ($o in 1.0, 0.9, 0.8, 0.7, 0.6) { @{ label = ('{0}%' -f [int]($o * 100)); key = 'opacity'; value = [double]$o } })
+    Add-ChoiceMenu $menu $S.menuVolume @(foreach ($v in 0, 25, 50, 75, 100) { @{ label = $(if ($v -eq 0) { $S.volumeMute } else { '{0}%' -f $v }); key = 'volume'; value = [int]$v } })
+    Add-ChoiceMenu $menu $S.menuScale @(foreach ($z in 1.0, 1.25, 1.5) { @{ label = ('{0}%' -f [int]($z * 100)); key = 'scale'; value = [double]$z } })
+    $minItem = New-Object System.Windows.Controls.MenuItem
+    $minItem.Header = $S.menuMinimal
+    $minItem.Add_Click({ param($src, $e) Set-Pref 'minimal' (-not [bool]$script:prefs.minimal); $src.IsChecked = [bool]$script:prefs.minimal })
+    $minItem.IsChecked = [bool]$script:prefs.minimal
+    [void]$menu.Items.Add($minItem)
+    [void]$menu.Items.Add((New-Object System.Windows.Controls.Separator))
     $closeItem = New-Object System.Windows.Controls.MenuItem
     $closeItem.Header = $S.closeWidget
     $closeItem.Add_Click({ Close-Widget })
     [void]$menu.Items.Add($closeItem)
     $ui.Card.ContextMenu = $menu
+    Sync-MenuChecks
+    # The README screenshots are always drawn at normal opacity and size
+    if (-not $RenderMode) {
+        Set-Opacity
+        Set-Scale
+    }
+    Update-IdleLook
     try { Set-Theme (Resolve-Theme $script:prefs.theme (Get-WindowsLightTheme)) } catch { Write-Log $_ }
 
     # --- Tray icon and "do not disturb" ---
