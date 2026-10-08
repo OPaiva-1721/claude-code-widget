@@ -1089,10 +1089,21 @@ namespace ClaudeWidget {
         $win.Close()
     }
     function Set-Opacity { $win.Opacity = [double]$script:prefs.opacity }
-    function Set-Scale {
-        $sc = [double]$script:prefs.scale
+    function Set-CardScale([double]$sc) {
         $ui.Card.LayoutTransform = New-Object System.Windows.Media.ScaleTransform $sc, $sc
     }
+    function Set-Scale { Set-CardScale ([double]$script:prefs.scale); Update-Fit }
+    # A tall card (a long question) at 150% would push its buttons below the screen: use the biggest
+    # scale, up to the chosen one, at which the window fits the work area (the margin is not scaled)
+    function Update-Fit {
+        $cur = if ($ui.Card.LayoutTransform -is [System.Windows.Media.ScaleTransform]) { $ui.Card.LayoutTransform.ScaleY } else { 1.0 }
+        if ($win.ActualHeight -le 0 -or $cur -le 0) { return }
+        $margin = 28.0
+        $unscaled = ($win.ActualHeight - $margin) / $cur + $margin
+        $target = Get-FitScale ([double]$script:prefs.scale) $unscaled ([System.Windows.SystemParameters]::WorkArea.Height)
+        if ([math]::Abs($target - $cur) -gt 0.005) { Set-CardScale $target }
+    }
+    if (-not $RenderMode) { $win.Add_SizeChanged({ try { Update-Fit } catch { Write-Log $_ } }) }
     # The idle pill's tooltip carries the status text when the pill is minimal (the text itself is hidden)
     function Update-IdleLook {
         $min = [bool]$script:prefs.minimal

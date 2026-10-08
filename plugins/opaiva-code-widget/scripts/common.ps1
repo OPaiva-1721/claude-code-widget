@@ -431,3 +431,12 @@ function Convert-ThemeColor([string]$Hex, [hashtable]$Map) {
     if ($Map -and $Map.ContainsKey($Hex)) { return $Map[$Hex] }
     return $Hex
 }
+
+# The scale to really use: the chosen one, lowered (never below 0.5) so that a card $UnscaledHeight tall
+# (at 100%, margins included) still fits a work area $WorkHeight tall. Rounded down to 2 decimals.
+function Get-FitScale([double]$Pref, [double]$UnscaledHeight, [double]$WorkHeight) {
+    if ($UnscaledHeight -le 0 -or $WorkHeight -le 0) { return $Pref }
+    $max = $WorkHeight / $UnscaledHeight
+    if ($max -ge $Pref) { return $Pref }
+    return [math]::Max(0.5, [math]::Floor($max * 100 + 1e-9) / 100)
+}

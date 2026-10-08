@@ -642,3 +642,27 @@ Describe 'Convert-ThemeColor' {
         foreach ($k in $m.Keys) { Convert-ThemeColor (Convert-ThemeColor $k $m) $back | Should -Be $k }
     }
 }
+
+Describe 'Get-FitScale' {
+    It 'keeps the chosen scale when the card fits the work area' {
+        Get-FitScale 1.5 500 1000 | Should -Be 1.5
+    }
+    It 'shrinks the scale so that the card still fits the work area' {
+        # 800 DIP tall at 100% on a 1000 DIP work area: 1.5 would need 1200
+        Get-FitScale 1.5 800 1000 | Should -Be 1.25
+    }
+    It 'never goes above the chosen scale' {
+        Get-FitScale 1.0 100 1000 | Should -Be 1.0
+    }
+    It 'shrinks below 100% when even the normal size does not fit, but not below 50%' {
+        Get-FitScale 1.0 1250 1000 | Should -Be 0.8
+        Get-FitScale 1.0 5000 1000 | Should -Be 0.5
+    }
+    It 'rounds down so that the result never overflows' {
+        Get-FitScale 1.5 900 1000 | Should -Be 1.11
+    }
+    It 'ignores a zero or negative height (not measured yet)' {
+        Get-FitScale 1.5 0 1000 | Should -Be 1.5
+        Get-FitScale 1.25 -5 1000 | Should -Be 1.25
+    }
+}
