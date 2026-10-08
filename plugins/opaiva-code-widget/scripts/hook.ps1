@@ -66,6 +66,8 @@ function Start-Widget {
             [string]::Equals([IO.Path]::GetFullPath([string]$info.script), $WidgetScript, [StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
+        # A widget from a newer version (another session already updated) stays
+        if (-not (Test-WidgetOlder ([string]$info.script) $WidgetScript)) { return $true }
         Write-HookLog "restarting widget from an older version ($($info.script))"
         # Ask it to close itself first (it removes its tray icon); kill it if it does not within 4 s
         $quit = Join-Path $Data 'quit.flag'

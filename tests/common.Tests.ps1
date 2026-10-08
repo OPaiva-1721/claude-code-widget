@@ -666,3 +666,30 @@ Describe 'Get-FitScale' {
         Get-FitScale 1.25 -5 1000 | Should -Be 1.25
     }
 }
+
+
+Describe 'Get-ScriptVersion / Test-WidgetOlder' {
+    It 'reads the version from the plugin cache folder name' {
+        Get-ScriptVersion 'C:\x\opaiva-code-widget\2.3.0\scripts\widget.ps1' | Should -Be ([version]'2.3.0')
+    }
+    It 'falls back to plugin.json next to the scripts folder' {
+        $root = Join-Path $TestDrive 'plug'
+        New-Item -ItemType Directory -Path (Join-Path $root 'scripts'), (Join-Path $root '.claude-plugin') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root '.claude-plugin\plugin.json'), '{"version":"3.1.4"}')
+        Get-ScriptVersion (Join-Path $root 'scripts\widget.ps1') | Should -Be ([version]'3.1.4')
+    }
+    It 'gives nothing when it cannot tell' {
+        Get-ScriptVersion (Join-Path $TestDrive 'nowhere\scripts\widget.ps1') | Should -BeNullOrEmpty
+    }
+    It 'replaces a running widget only when it is older than this one' -ForEach @(
+        @{ running = 'C:\a\2.3.0\scripts\widget.ps1'; own = 'C:\a\2.4.0\scripts\widget.ps1'; want = $true }
+        @{ running = 'C:\a\2.4.0\scripts\widget.ps1'; own = 'C:\a\2.3.0\scripts\widget.ps1'; want = $false }
+        @{ running = 'C:\a\2.10.0\scripts\widget.ps1'; own = 'C:\a\2.9.0\scripts\widget.ps1'; want = $false }
+        @{ running = 'C:\a\2.4.0\scripts\widget.ps1'; own = 'C:\b\2.4.0\scripts\widget.ps1'; want = $false }
+    ) {
+        Test-WidgetOlder $running $own | Should -Be $want
+    }
+    It 'keeps the old behavior (replace) when a version is unknown' {
+        Test-WidgetOlder 'C:\nowhere\scripts\widget.ps1' 'C:\a\2.4.0\scripts\widget.ps1' | Should -BeTrue
+    }
+}

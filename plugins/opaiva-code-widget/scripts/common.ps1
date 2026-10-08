@@ -440,3 +440,28 @@ function Get-FitScale([double]$Pref, [double]$UnscaledHeight, [double]$WorkHeigh
     if ($max -ge $Pref) { return $Pref }
     return [math]::Max(0.5, [math]::Floor($max * 100 + 1e-9) / 100)
 }
+
+
+# Version of a plugin script: the cache folder name (...\opaiva-code-widget\2.4.0\scripts\x.ps1), else
+# the version in plugin.json next to the scripts folder, else $null
+function Get-ScriptVersion([string]$ScriptPath) {
+    if ($ScriptPath -match '\\(\d+\.\d+\.\d+)\\scripts\\[^\\]+$') { return [version]$Matches[1] }
+    try {
+        $json = Join-Path (Split-Path -Parent (Split-Path -Parent $ScriptPath)) '.claude-plugin\plugin.json'
+        if (Test-Path -LiteralPath $json) {
+            $v = ([IO.File]::ReadAllText($json, (Get-Utf8NoBom)) | ConvertFrom-Json).version
+            if ($v) { return [version][string]$v }
+        }
+    } catch {}
+    return $null
+}
+
+# Should a hook running $OwnScript replace the widget running $RunningScript? Only when the widget is
+# older: a session still on an old plugin version must not downgrade a widget a newer one started.
+# Unknown versions keep the old behavior (replace).
+function Test-WidgetOlder([string]$RunningScript, [string]$OwnScript) {
+    $running = Get-ScriptVersion $RunningScript
+    $own = Get-ScriptVersion $OwnScript
+    if ($running -and $own) { return ($running -lt $own) }
+    return $true
+}
