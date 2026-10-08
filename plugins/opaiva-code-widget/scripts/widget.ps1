@@ -124,6 +124,13 @@ namespace ClaudeWidget {
         try { $script:doneSound = New-Object System.Media.SoundPlayer $wav; $script:doneSound.Load() } catch { $script:doneSound = $null }
     }
 
+    # "All done" sound: the last session of a round with several sessions finished
+    $script:allDoneSound = $null
+    $tada = Join-Path $env:WINDIR 'Media\tada.wav'
+    if (Test-Path -LiteralPath $tada) {
+        try { $script:allDoneSound = New-Object System.Media.SoundPlayer $tada; $script:allDoneSound.Load() } catch { $script:allDoneSound = $null }
+    }
+
     [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -373,6 +380,9 @@ namespace ClaudeWidget {
     })
 
     $win.Add_MouseLeftButtonDown({
+        param($src, $e)
+        # Buttons, options and the text box handle their own clicks and never get here
+        if ($e.ClickCount -eq 2) { Invoke-DoubleClick; return }
         $left = $win.Left
         $top = $win.Top
         try { $win.DragMove() } catch {}
@@ -465,12 +475,14 @@ namespace ClaudeWidget {
         else { $chip.Visibility = 'Collapsed' }
     }
 
-    function Set-ProjectChip($chip, $textBlock, [string]$cwd) {
-        if ($cwd) {
-            $textBlock.Text = Split-Path -Leaf $cwd
-            $chip.Visibility = 'Visible'
-        }
-        else { $chip.Visibility = 'Collapsed' }
+    # "project . session title" (the title cut at 40 characters); either part may be missing
+    function Set-ProjectChip($chip, $textBlock, $item) {
+        $text = if ($item.cwd) { Split-Path -Leaf ([string]$item.cwd) } else { '' }
+        $title = ([string]$item.title).Trim()
+        if ($title.Length -gt 40) { $title = $title.Substring(0, 39) + '...' }
+        if ($title) { $text = if ($text) { $text + ' ' + [char]0x00B7 + ' ' + $title } else { $title } }
+        $textBlock.Text = $text
+        $chip.Visibility = if ($text) { 'Visible' } else { 'Collapsed' }
     }
 
     # Queue readers live in common.ps1; the caches keep each file from being re-read every tick
@@ -480,7 +492,7 @@ namespace ClaudeWidget {
     # ---------------- Permission request ----------------
     function Show-Permission($r) {
         $ui.Tool.Text = [string]$r.tool
-        Set-ProjectChip $ui.ProjectChip $ui.Project ([string]$r.cwd)
+        Set-ProjectChip $ui.ProjectChip $ui.Project $r
         if ($r.cwd) { $ui.Cwd.Text = [string]$r.cwd; $ui.Cwd.Visibility = 'Visible' } else { $ui.Cwd.Visibility = 'Collapsed' }
         $ui.Desc.Text = [string]$r.description
         $ui.Detail.Text = [string]$r.detail
@@ -563,7 +575,7 @@ namespace ClaudeWidget {
     }
 
     function Show-Question($r) {
-        Set-ProjectChip $ui.QProjectChip $ui.QProject ([string]$r.cwd)
+        Set-ProjectChip $ui.QProjectChip $ui.QProject $r
         $ui.QList.Children.Clear()
         $script:qState = New-Object System.Collections.ArrayList
         $questions = @($r.questions)
@@ -735,7 +747,7 @@ namespace ClaudeWidget {
         if (-not $script:currentDone -or $script:currentDone.key -ne $d.key) {
             $script:currentDone = $d
             $script:shownAt = Get-NowMs
-            Set-ProjectChip $ui.DoneProjectChip $ui.DoneProject ([string]$d.cwd)
+            Set-ProjectChip $ui.DoneProjectChip $ui.DoneProject $d
             $ui.DoneMsg.Text = [string]$d.message
             $ui.BtnGoVs.Content = switch ([string]$d.kind) {
                 'terminal' { $S.goToTerminal }
@@ -743,8 +755,13 @@ namespace ClaudeWidget {
                 default { $S.goToVsCode }
             }
             Set-Panel 'DonePanel'
+            $allDone = [bool]$d.allDone
             Invoke-Attention $d.key {
-                if ($script:doneSound) { $script:doneSound.Play() } else { [System.Media.SystemSounds]::Beep.Play() }
+                if ($allDone) {
+                    if ($script:allDoneSound) { $script:allDoneSound.Play() } else { [System.Media.SystemSounds]::Exclamation.Play() }
+                }
+                elseif ($script:doneSound) { $script:doneSound.Play() }
+                else { [System.Media.SystemSounds]::Beep.Play() }
             }
         }
         if ($total -gt 1) {
@@ -787,6 +804,29 @@ namespace ClaudeWidget {
         }
         if ($windows.Count -gt 0) { return $windows[0] }
         return [IntPtr]::Zero
+    }
+
+    # Brings the window remembered for the session you typed in last, if it still exists
+    function Show-LatestSessionWindow {
+        $dir = Join-Path $Data 'sessions'
+        foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter '*.json' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+            try {
+                $w = [IO.File]::ReadAllText($f.FullName, $Utf8) | ConvertFrom-Json
+                if ([ClaudeWidget.WinFocus]::FocusHandle([int64]$w.hwnd)) { return $true }
+            } catch {}
+        }
+        return $false
+    }
+
+    # Double click outside buttons: the finished notice's session; otherwise the latest session's
+    # window, else the VS Code window of the project on screen (or any VS Code window)
+    function Invoke-DoubleClick {
+        if (-not $script:canFocus) { return }
+        if ($script:currentDone) { Close-DoneNotice -GoToSession; return }
+        if (Show-LatestSessionWindow) { return }
+        $project = if ($script:current -and $script:current.cwd) { Split-Path -Leaf ([string]$script:current.cwd) } else { '' }
+        $h = Find-VsCodeWindow $project
+        if ($h -ne [IntPtr]::Zero) { [void][ClaudeWidget.WinFocus]::FocusHandle($h.ToInt64()) }
     }
 
     function Close-DoneNotice([switch]$GoToSession) {

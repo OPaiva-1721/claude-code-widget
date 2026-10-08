@@ -124,3 +124,121 @@ Describe 'Get-WindowKind' {
         Get-WindowKind $process | Should -BeExactly $kind
     }
 }
+
+Describe 'Get-SessionTitle' {
+    BeforeAll { $titles = Join-Path $fixtures 'titles.jsonl' }
+    It 'prefers the name given with /rename over the automatic title' {
+        Get-SessionTitle $titles 's-1' | Should -BeExactly 'Named with rename'
+    }
+    It 'uses the latest automatic title when there is no /rename' {
+        Get-SessionTitle $titles 's-3' | Should -BeExactly 'Only automatic'
+    }
+    It 'ignores titles of other sessions' {
+        Get-SessionTitle $titles 's-9' | Should -BeExactly ''
+    }
+    It 'is empty without a transcript' {
+        Get-SessionTitle '' 's-1' | Should -BeExactly ''
+        Get-SessionTitle (Join-Path $TestDrive 'missing.jsonl') 's-1' | Should -BeExactly ''
+    }
+    It 'only reads the last 512 KB' {
+        $path = Join-Path $TestDrive 'long.jsonl'
+        $filler = '{"type":"user","message":"' + ('x' * 1000) + '"}'
+        $lines = @('{"type":"ai-title","aiTitle":"Too far back","sessionId":"s-1"}') + @($filler) * 600
+        [IO.File]::WriteAllLines($path, [string[]]$lines)
+        Get-SessionTitle $path 's-1' | Should -BeExactly ''
+        [IO.File]::AppendAllText($path, '{"type":"ai-title","aiTitle":"Near the end","sessionId":"s-1"}' + "`n")
+        Get-SessionTitle $path 's-1' | Should -BeExactly 'Near the end'
+    }
+}
+
+Describe 'busy sessions and all done' {
+    BeforeEach {
+        Remove-Item -LiteralPath $Busy, $RoundPath -Recurse -Force -ErrorAction SilentlyContinue
+        function Set-FakeBusy([string]$Sid, [int]$ProcessId, [int64]$AgeMs = 0) {
+            New-Item -ItemType Directory -Force -Path $Busy | Out-Null
+            Remove-Item -LiteralPath (Join-Path $Busy "$Sid.json") -Force -ErrorAction SilentlyContinue
+            Write-JsonAtomic (Join-Path $Busy "$Sid.json") @{ pid = $ProcessId; since = (Get-NowMs) - $AgeMs }
+        }
+    }
+    It 'finds the Claude process or 0, without error' {
+        Get-ClaudePid | Should -BeGreaterOrEqual 0
+    }
+    It 'is not "all done" for a session working alone' {
+        Set-SessionBusy 'a'
+        Join-Path $Busy 'a.json' | Should -Exist
+        Complete-SessionBusy 'a' | Should -BeFalse
+        Join-Path $Busy 'a.json' | Should -Not -Exist
+    }
+    It 'is "all done" when the last of two sessions finishes' {
+        Set-SessionBusy 'a'
+        Set-FakeBusy 'a' $PID
+        Set-SessionBusy 'b'
+        Set-FakeBusy 'b' $PID
+        Complete-SessionBusy 'a' | Should -BeFalse
+        Complete-SessionBusy 'b' | Should -BeTrue
+        $RoundPath | Should -Not -Exist
+    }
+    It 'does not count a session whose Claude process is gone, and removes its file' {
+        Set-SessionBusy 'a'
+        Set-FakeBusy 'a' $PID
+        Set-SessionBusy 'dead'
+        Set-FakeBusy 'dead' 2147483640
+        Complete-SessionBusy 'a' | Should -BeTrue
+        Join-Path $Busy 'dead.json' | Should -Not -Exist
+    }
+    It 'does not count a session working for more than 12 hours' {
+        Set-SessionBusy 'a'
+        Set-FakeBusy 'a' $PID
+        Set-SessionBusy 'old'
+        Set-FakeBusy 'old' 0 (13 * 3600 * 1000)
+        Complete-SessionBusy 'a' | Should -BeTrue
+    }
+    It 'counts a recent session with an unknown Claude process' {
+        Set-SessionBusy 'a'
+        Set-FakeBusy 'a' $PID
+        Set-SessionBusy 'unknown'
+        Set-FakeBusy 'unknown' 0
+        Complete-SessionBusy 'a' | Should -BeFalse
+    }
+    It 'starts a new round once nothing is working' {
+        Set-SessionBusy 'a'
+        Set-FakeBusy 'a' $PID
+        Set-SessionBusy 'b'
+        Set-FakeBusy 'b' $PID
+        [void](Complete-SessionBusy 'a')
+        [void](Complete-SessionBusy 'b')
+        Set-SessionBusy 'c'
+        Complete-SessionBusy 'c' | Should -BeFalse
+    }
+}
+
+Describe 'busy sessions whose turn was interrupted' {
+    BeforeEach { Remove-Item -LiteralPath $Busy, $RoundPath -Recurse -Force -ErrorAction SilentlyContinue }
+    # Esc fires no Stop: the process lives on, but the transcript stops growing
+    It 'does not count a session whose transcript has been quiet for 20 minutes' {
+        $quiet = Join-Path $TestDrive 'quiet.jsonl'
+        [IO.File]::WriteAllText($quiet, '{}')
+        (Get-Item -LiteralPath $quiet).LastWriteTime = (Get-Date).AddMinutes(-20)
+        Set-SessionBusy 'a'
+        Set-SessionBusy 'b' $quiet
+        Remove-Item -LiteralPath (Join-Path $Busy 'a.json'), (Join-Path $Busy 'b.json') -Force
+        Write-JsonAtomic (Join-Path $Busy 'a.json') @{ pid = $PID; since = Get-NowMs }
+        Write-JsonAtomic (Join-Path $Busy 'b.json') @{ pid = $PID; since = Get-NowMs; transcript = $quiet }
+        Complete-SessionBusy 'a' | Should -BeTrue
+        Join-Path $Busy 'b.json' | Should -Not -Exist
+    }
+    It 'counts a session whose transcript was written a minute ago' {
+        $live = Join-Path $TestDrive 'live.jsonl'
+        [IO.File]::WriteAllText($live, '{}')
+        Set-SessionBusy 'a'
+        Set-SessionBusy 'b' $live
+        Remove-Item -LiteralPath (Join-Path $Busy 'a.json'), (Join-Path $Busy 'b.json') -Force
+        Write-JsonAtomic (Join-Path $Busy 'a.json') @{ pid = $PID; since = Get-NowMs }
+        Write-JsonAtomic (Join-Path $Busy 'b.json') @{ pid = $PID; since = Get-NowMs; transcript = $live }
+        Complete-SessionBusy 'a' | Should -BeFalse
+    }
+    It 'records the transcript path in the busy file' {
+        Set-SessionBusy 'a' 'C:\x\t.jsonl'
+        ([IO.File]::ReadAllText((Join-Path $Busy 'a.json')) | ConvertFrom-Json).transcript | Should -BeExactly 'C:\x\t.jsonl'
+    }
+}

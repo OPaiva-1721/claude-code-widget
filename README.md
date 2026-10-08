@@ -85,8 +85,10 @@ The widget starts in the default corner again, because the new name comes with a
 | Green check, **finished** | **Go to VS Code** or **Go to terminal** brings that session's window to the front. **OK** dismisses the notice. |
 
 - **Drag** the widget anywhere. It remembers the position.
+- **Double-click** the widget (outside its buttons) to bring back the session's window: on a "finished" notice, that session; otherwise, the session you typed in last.
 - **Right-click → Close widget** closes it. Pending requests go back to VS Code. It opens again with the next session or request.
 - With several requests or sessions, a chip shows how many are waiting (`+1 queued`), and they come one at a time.
+- The project chip also shows the session's title (the name from `/rename`, or Claude Code's automatic one). When several sessions were working and the last one finishes, its notice plays a different sound.
 
 ## Behavior worth knowing
 
@@ -122,7 +124,7 @@ Claude Code ──hook──▶ hook.ps1 ──queue\req-<id>.json──▶ widg
             ◀─JSON──           ◀──queue\res-<id>.json──
 ```
 
-- `hook.ps1` runs on five hook events. On `PermissionRequest` and on `PreToolUse` for `AskUserQuestion`, it writes a request file and waits for the widget's answer. Then it prints the decision in Claude Code's hook format. On `Stop` it writes a "finished" notice, and on `UserPromptSubmit` it clears it. On `UserPromptSubmit` it also remembers the window in front, but only if the process tree shows it belongs to that Claude Code session. A prompt sent from your phone leaves an unrelated window in front, so it is ignored. On `SessionStart` it only makes sure the widget is running.
+- `hook.ps1` runs on five hook events. On `PermissionRequest` and on `PreToolUse` for `AskUserQuestion`, it writes a request file and waits for the widget's answer. Then it prints the decision in Claude Code's hook format. On `Stop` it writes a "finished" notice, and on `UserPromptSubmit` it clears it. On `UserPromptSubmit` it also remembers the window in front, but only if the process tree shows it belongs to that Claude Code session. A prompt sent from your phone leaves an unrelated window in front, so it is ignored. On `SessionStart` it only makes sure the widget is running. It also keeps track of which sessions are working (`busy\`), to tell when the last one of several finishes.
 - `widget.ps1` is a single long-running process, one per user. It is started outside Claude Code's process tree, so it survives the end of a session. It polls the queue folder and shows the oldest item first.
 - `common.ps1` holds the helpers both scripts share: the widget's mutex name, atomic JSON writes, the UI language and the queue readers.
 - Files live in the plugin data folder, `%USERPROFILE%\.claude\plugins\data\opaiva-code-widget-claude-code-widget\`: the queue, each session's window (`sessions\`), the widget position (`state.json`) and logs (`hook.log`, `widget.log`; each keeps up to 256 KB, plus one `.old` file).
