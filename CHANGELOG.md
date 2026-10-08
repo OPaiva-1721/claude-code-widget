@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.1 (2026-10-08)
+
+- **An old session no longer downgrades the widget.** After a plugin update, a Claude Code session still running the previous version used to replace the new widget with its own old one (at its next "finished" notice). The hook now replaces a running widget only when that widget is older than the hook's own version.
+
 ## 2.4.0 (2026-10-08)
 
 - **Look and sound from the right-click menu.** Theme (dark, light, or automatic like Windows), opacity (100-60%), volume (mute to 100%), size (100/125/150%) and a minimal idle pill (only the colored dot; the status becomes a tooltip). Each choice applies at once and is saved in `prefs.json`.

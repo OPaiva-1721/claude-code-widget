@@ -300,6 +300,13 @@ Describe 'hook.ps1 end to end' {
             }
             finally { if (-not $polite.HasExited) { $polite.Kill() } }
         }
+        It 'keeps a widget that is newer than this version (an old session must not downgrade it)' {
+            Write-JsonAtomic (Join-Path $box.Data 'widget.json') @{ pid = $fake.Id; script = 'C:\new\99.0.0\scripts\widget.ps1' }
+            $r = Complete-Hook (Start-Hook $box (New-HookEvent 'SessionStart' $box.Data @{ source = 'startup' }))
+            $r.Stdout | Should -BeNullOrEmpty
+            $fake.HasExited | Should -BeFalse
+            [IO.File]::ReadAllText((Join-Path $box.Data 'hook.log')) | Should -Not -Match 'restarting'
+        }
         It 'keeps a widget started from this version' {
             $current = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $box.Hook) 'widget.ps1'))
             Write-JsonAtomic (Join-Path $box.Data 'widget.json') @{ pid = $fake.Id; script = $current }
