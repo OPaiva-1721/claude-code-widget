@@ -8,7 +8,7 @@
 # It only accepts focus while you type an "Other answer", then gives focus back.
 # Drag to move (position saved in state.json); right-click > Close widget.
 # Started by hook.ps1 with the plugin data dir; usually you never run it by hand.
-# -RenderSamples <samples.json> -OutDir <dir>: draws each state with sample data to transparent PNGs
+# -RenderSamples <samples.json> -OutDir <dir> [-Theme dark|light]: draws each state with sample data to transparent PNGs
 # (README screenshots, see tools/render-screenshots.ps1) and exits, without touching the queue.
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less files as ANSI. UI text lives in
 # strings.json (read explicitly as UTF-8).
@@ -16,7 +16,8 @@ param(
     [string]$DataDir = (Join-Path $env:USERPROFILE '.claude\opaiva-code-widget'),
     [string]$Lang = '',
     [string]$RenderSamples = '',
-    [string]$OutDir = ''
+    [string]$OutDir = '',
+    [string]$Theme = ''
 )
 $RenderMode = [bool]$RenderSamples
 $ErrorActionPreference = 'Stop'
@@ -32,6 +33,10 @@ $DoneMaxAgeMs = 12 * 3600 * 1000
 
 $Lang = Resolve-Lang $Lang
 $S = Get-Strings $Lang
+
+# Preferences (prefs.json): theme, opacity, volume, scale, minimal pill. -Theme only applies to -RenderSamples.
+$script:prefs = Read-Prefs $Data
+if ($RenderMode -and $Theme) { $script:prefs.theme = $Theme }
 
 # One widget per data dir; hook.ps1 computes the same name to know whether the widget is running
 $MutexName = Get-MutexName $Data
@@ -429,14 +434,44 @@ namespace ClaudeWidget {
     $script:typing = $false    # focus allowed to type an "Other answer"
     $script:prevFg = [IntPtr]::Zero
 
+    # Every color in this file is written in the dark theme; the current theme's map translates it
+    $script:colorMap = @{}
     $script:brushes = @{}
-    function Get-Brush([string]$hex) {
+    function New-FrozenBrush([string]$hex) {
         if (-not $script:brushes.ContainsKey($hex)) {
             $b = (New-Object System.Windows.Media.BrushConverter).ConvertFromString($hex)
             $b.Freeze()
             $script:brushes[$hex] = $b
         }
         return $script:brushes[$hex]
+    }
+    function Get-Brush([string]$hex) { return New-FrozenBrush (Convert-ThemeColor $hex $script:colorMap) }
+
+    # Switches the theme live: recolors every element already created (walking the logical tree), by
+    # way of the dark color it started from; what is created later is translated by Get-Brush.
+    function Convert-ElementColors($el, [hashtable]$back, [hashtable]$new) {
+        foreach ($n in 'Foreground', 'Background', 'BorderBrush', 'Fill', 'Stroke', 'CaretBrush', 'SelectionBrush') {
+            try {
+                $prop = $el.GetType().GetProperty($n)
+                if (-not $prop -or -not $prop.CanWrite -or $prop.GetIndexParameters().Count -ne 0) { continue }
+                $b = $prop.GetValue($el, $null)
+                if ($b -isnot [System.Windows.Media.SolidColorBrush] -or $b.Color.A -ne 255) { continue }
+                $hex = '#{0:X2}{1:X2}{2:X2}' -f $b.Color.R, $b.Color.G, $b.Color.B
+                $dark = Convert-ThemeColor $hex $back
+                $target = Convert-ThemeColor $dark $new
+                if ($target -ne $hex) { $prop.SetValue($el, (New-FrozenBrush $target), $null) }
+            } catch {}
+        }
+        foreach ($child in [System.Windows.LogicalTreeHelper]::GetChildren($el)) {
+            if ($child -is [System.Windows.DependencyObject]) { Convert-ElementColors $child $back $new }
+        }
+    }
+    function Set-Theme([string]$name) {
+        $new = Get-ColorMap $name
+        $back = @{}
+        foreach ($k in $script:colorMap.Keys) { $back[$script:colorMap[$k]] = $k }
+        Convert-ElementColors $win $back $new
+        $script:colorMap = $new
     }
 
     # --- Focus: only while typing a free-text answer ---
@@ -1033,6 +1068,7 @@ namespace ClaudeWidget {
     $closeItem.Add_Click({ Close-Widget })
     [void]$menu.Items.Add($closeItem)
     $ui.Card.ContextMenu = $menu
+    try { Set-Theme (Resolve-Theme $script:prefs.theme (Get-WindowsLightTheme)) } catch { Write-Log $_ }
 
     # --- Tray icon and "do not disturb" ---
     # The mode is the file dnd.flag: hook.ps1 sends requests to VS Code while it exists, and here the

@@ -69,6 +69,23 @@ Describe 'widget.ps1 rendering' -Tag 'Desktop' {
             (Get-Item -LiteralPath $png).Length | Should -BeGreaterThan 1024
         }
     }
+    It 'draws the light theme with a light card and the dark theme with a dark card' {
+        Add-Type -AssemblyName System.Drawing
+        function Get-CardPixel([string]$theme) {
+            $out = Join-Path $TestDrive "t-$theme"
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $widget -RenderSamples $samples -OutDir $out -Lang en -Theme $theme
+            $LASTEXITCODE | Should -Be 0
+            $bmp = New-Object System.Drawing.Bitmap (Join-Path $out 'permission.png')
+            try {
+                # 2x render: x = 50 px is inside the card's left padding, at mid height there is no content
+                $c = $bmp.GetPixel(50, [int]($bmp.Height / 2))
+                return [int](($c.R + $c.G + $c.B) / 3)
+            }
+            finally { $bmp.Dispose() }
+        }
+        (Get-CardPixel 'light') | Should -BeGreaterThan 200
+        (Get-CardPixel 'dark') | Should -BeLessThan 80
+    }
 }
 
 Describe 'widget.ps1 queue loop' -Tag 'Desktop' {
