@@ -345,3 +345,89 @@ function Format-RuleText($Rule) {
         return $tool
     } catch { return '' }
 }
+
+
+# ---------------- Preferences (prefs.json) and theme ----------------
+
+function Get-DefaultPrefs { @{ theme = 'dark'; opacity = 1.0; volume = 100; scale = 1.0; minimal = $false } }
+
+# prefs.json in the data dir. Always returns a complete, valid set: a missing file gives the defaults,
+# and each bad field falls back to its default on its own.
+function Read-Prefs([string]$Dir) {
+    $p = Get-DefaultPrefs
+    $j = $null
+    try {
+        $path = Join-Path $Dir 'prefs.json'
+        if (Test-Path -LiteralPath $path) { $j = [IO.File]::ReadAllText($path, (Get-Utf8NoBom)) | ConvertFrom-Json }
+    } catch { return $p }
+    if ($null -eq $j) { return $p }
+    $num = {
+        param($v)
+        $n = 0.0
+        if ($null -ne $v -and $v -isnot [bool] -and [double]::TryParse([string]$v, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n) -and
+            -not [double]::IsNaN($n) -and -not [double]::IsInfinity($n)) { return $n }
+        return $null
+    }
+    if ($j.theme -is [string] -and @('dark', 'light', 'auto') -contains $j.theme) { $p.theme = $j.theme }
+    $n = & $num $j.opacity
+    if ($null -ne $n) { $p.opacity = [math]::Min(1.0, [math]::Max(0.5, $n)) }
+    $n = & $num $j.volume
+    if ($null -ne $n) { $p.volume = [int][math]::Min(100, [math]::Max(0, [math]::Round($n))) }
+    $n = & $num $j.scale
+    if ($null -ne $n) {
+        $best = 1.0
+        foreach ($c in 1.0, 1.25, 1.5) { if ([math]::Abs($c - $n) -lt [math]::Abs($best - $n)) { $best = $c } }
+        $p.scale = $best
+    }
+    if ($j.minimal -is [bool]) { $p.minimal = $j.minimal }
+    return $p
+}
+
+# Overwrites prefs.json. Returns $false (never throws) when it cannot write.
+function Save-Prefs([string]$Dir, $Prefs) {
+    try {
+        $o = [ordered]@{ theme = [string]$Prefs.theme; opacity = [double]$Prefs.opacity; volume = [int]$Prefs.volume; scale = [double]$Prefs.scale; minimal = [bool]$Prefs.minimal }
+        [IO.File]::WriteAllText((Join-Path $Dir 'prefs.json'), ($o | ConvertTo-Json -Compress), (Get-Utf8NoBom))
+        return $true
+    } catch { return $false }
+}
+
+# True when Windows apps use the light theme (HKCU ...\Themes\Personalize\AppsUseLightTheme = 1)
+function Get-WindowsLightTheme {
+    try {
+        $v = Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction Stop
+        return ($v.AppsUseLightTheme -eq 1)
+    } catch { return $false }
+}
+
+# 'dark' or 'light' from the saved choice ('auto' follows Windows)
+function Resolve-Theme([string]$Theme, [bool]$WindowsIsLight = $false) {
+    if ($Theme -eq 'light') { return 'light' }
+    if ($Theme -eq 'auto' -and $WindowsIsLight) { return 'light' }
+    return 'dark'
+}
+
+# The widget is written in the dark colors. A theme is a map "dark color -> this theme's color"; the
+# dark theme is the empty map. Colors without an entry (white on the orange buttons, the orange accent,
+# the green of the finished notice) are the same in every theme. Values must be unique and never also
+# a key, so that going back (theme color -> dark color) is unambiguous: Get-ColorMap's tests enforce it.
+function Get-ColorMap([string]$Theme) {
+    if ($Theme -ne 'light') { return @{} }
+    return @{
+        '#1E1E22' = '#FAFAFB'; '#34343B' = '#D9D9DF'; '#4A4A54' = '#B8B8C2'; '#5FB98A' = '#2F9A66'
+        '#E8E8EC' = '#1F1F24'; '#7E7E88' = '#6A6A74'; '#F4F4F6' = '#17171A'; '#8A8A93' = '#70707C'
+        '#3A2A24' = '#FBE6DC'; '#F0A58A' = '#B4502A'; '#26262C' = '#ECECF0'; '#C8C8D0' = '#3A3A44'
+        '#2E2A1E' = '#FBF1D2'; '#E8C770' = '#8A6A10'; '#DADAE0' = '#2A2A32'; '#141417' = '#F1F1F4'
+        '#2C2C33' = '#DCDCE2'; '#6E6E78' = '#7C7C86'; '#6A3A3A' = '#E3A8A8'; '#F29090' = '#B03A3A'
+        '#2A2A30' = '#E6E6EB'; '#3A3A42' = '#CFCFD6'; '#7AA2F7' = '#3E6BD6'; '#1F2E26' = '#DDF1E6'
+        '#7FD1A4' = '#1F7A4C'; '#3A1E1E' = '#FBE3E3'; '#1E3A2A' = '#DDF3E5'; '#7FD3A0' = '#1B7545'
+        '#24242A' = '#F3F3F6'; '#F0F0F4' = '#202028'; '#9A9AA4' = '#5E5E68'; '#22304A' = '#DCE6FB'
+        '#9DB8F5' = '#2F57B8'
+    }
+}
+
+# The color a map gives to $Hex (case-insensitive); unchanged when it has no entry
+function Convert-ThemeColor([string]$Hex, [hashtable]$Map) {
+    if ($Map -and $Map.ContainsKey($Hex)) { return $Map[$Hex] }
+    return $Hex
+}
