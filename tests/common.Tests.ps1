@@ -324,3 +324,63 @@ Describe 'Resolve-Anchor' {
         Resolve-Anchor @{ right = 2000; bottom = 900 } @() | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Get-BusySessions' {
+    BeforeEach {
+        $busy = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $busy | Out-Null
+        function Add-Busy([string]$Id, [int]$ProcessId, [int64]$AgeMs = 0, [string]$Cwd = 'C:\dev\app', [string]$Transcript = '') {
+            Write-JsonAtomic (Join-Path $busy "$Id.json") ([ordered]@{ pid = $ProcessId; since = (Get-NowMs) - $AgeMs; cwd = $Cwd; transcript = $Transcript })
+        }
+        $maxAge = 12 * 3600 * 1000
+        $quiet = 15 * 60 * 1000
+    }
+    It 'lists live sessions with id, cwd and transcript' {
+        Add-Busy 's1' $PID 1000 'C:\dev\one' 'C:\t\one.jsonl'
+        $list = @(Get-BusySessions $busy $maxAge $quiet)
+        $list.Count | Should -Be 1
+        $list[0].id | Should -BeExactly 's1'
+        $list[0].cwd | Should -BeExactly 'C:\dev\one'
+        $list[0].transcript | Should -BeExactly 'C:\t\one.jsonl'
+        $list[0].since | Should -BeGreaterThan 0
+    }
+    It 'removes sessions whose process is gone' {
+        Add-Busy 'dead' 2147483640
+        @(Get-BusySessions $busy $maxAge $quiet).Count | Should -Be 0
+        Join-Path $busy 'dead.json' | Should -Not -Exist
+    }
+    It 'removes sessions older than the maximum age' {
+        Add-Busy 'old' 0 ($maxAge + 60000)
+        @(Get-BusySessions $busy $maxAge $quiet).Count | Should -Be 0
+    }
+    It 'removes sessions whose transcript has been quiet too long' {
+        $t = Join-Path $TestDrive 'quiet.jsonl'
+        [IO.File]::WriteAllText($t, '{}')
+        (Get-Item -LiteralPath $t).LastWriteTime = (Get-Date).AddMinutes(-20)
+        Add-Busy 'quiet' $PID 0 'C:\dev\app' $t
+        @(Get-BusySessions $busy $maxAge $quiet).Count | Should -Be 0
+    }
+    It 'counts a session with an unknown process (pid 0)' {
+        Add-Busy 'unknown' 0
+        @(Get-BusySessions $busy $maxAge $quiet).Count | Should -Be 1
+    }
+    It 'returns nothing when the folder does not exist' {
+        @(Get-BusySessions (Join-Path $TestDrive 'nope') $maxAge $quiet).Count | Should -Be 0
+    }
+}
+
+Describe 'Test-Dnd and Set-Dnd' {
+    It 'is off by default, on after Set-Dnd and off again' {
+        $dir = Join-Path $TestDrive 'dnd'
+        Test-Dnd $dir | Should -BeFalse
+        Set-Dnd $dir $true
+        Test-Dnd $dir | Should -BeTrue
+        Join-Path $dir 'dnd.flag' | Should -Exist
+        Set-Dnd $dir $false
+        Test-Dnd $dir | Should -BeFalse
+    }
+    It 'turning it off twice is harmless' {
+        $dir = Join-Path $TestDrive 'dnd2'
+        { Set-Dnd $dir $false; Set-Dnd $dir $false } | Should -Not -Throw
+    }
+}

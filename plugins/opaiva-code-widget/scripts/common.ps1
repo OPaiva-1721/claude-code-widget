@@ -186,3 +186,81 @@ function Resolve-Anchor($Saved, $Areas) {
     foreach ($a in $list) { if ($a.primary) { $main = $a; break } }
     return @{ right = [double]$main.right; bottom = [double]$main.bottom; saved = $false }
 }
+
+# The session's title as Claude Code shows it: the name given with /rename (custom-title), else the
+# automatic one (ai-title). Both are repeated in the transcript every few turns, so the last 512 KB
+# are enough. Empty when there is none or the transcript cannot be read.
+function Get-SessionTitle([string]$TranscriptPath, [string]$SessionId) {
+    if (-not $TranscriptPath) { return '' }
+    try {
+        $fs = [IO.File]::Open($TranscriptPath, 'Open', 'Read', 'ReadWrite')
+        try {
+            $start = [math]::Max([int64]0, $fs.Length - [int64]512KB)
+            [void]$fs.Seek($start, 'Begin')
+            $buf = New-Object byte[] ([int]($fs.Length - $start))
+            $n = 0
+            while ($n -lt $buf.Length) {
+                $read = $fs.Read($buf, $n, $buf.Length - $n)
+                if ($read -le 0) { break }
+                $n += $read
+            }
+        }
+        finally { $fs.Dispose() }
+        $lines = [Text.Encoding]::UTF8.GetString($buf, 0, $n) -split "`n"
+        # Reading from the middle of the file: the first line is cut
+        if ($start -gt 0) { $lines = @($lines | Select-Object -Skip 1) }
+        $custom = ''
+        $auto = ''
+        foreach ($line in $lines) {
+            if ($line.IndexOf('"custom-title"') -lt 0 -and $line.IndexOf('"ai-title"') -lt 0) { continue }
+            try { $o = $line | ConvertFrom-Json } catch { continue }
+            if ($o.sessionId -and $SessionId -and [string]$o.sessionId -ne $SessionId) { continue }
+            if ($o.type -eq 'custom-title' -and $o.customTitle) { $custom = [string]$o.customTitle }
+            elseif ($o.type -eq 'ai-title' -and $o.aiTitle) { $auto = [string]$o.aiTitle }
+        }
+        if ($custom) { return $custom.Trim() }
+        return $auto.Trim()
+    } catch { return '' }
+}
+
+# Sessions working right now, read from the busy\<session>.json files the hook keeps: those whose
+# Claude process runs (or is unknown, pid 0), that started less than $MaxAgeMs ago and whose
+# transcript (when known) was written in the last $QuietMs. Files of the others are removed.
+# Returns { id; pid; since; cwd; transcript } objects.
+function Get-BusySessions([string]$BusyDir, [int64]$MaxAgeMs, [int64]$QuietMs) {
+    $now = Get-NowMs
+    foreach ($f in @(Get-ChildItem -LiteralPath $BusyDir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+        $alive = $false
+        $b = $null
+        try {
+            $b = [IO.File]::ReadAllText($f.FullName, (Get-Utf8NoBom)) | ConvertFrom-Json
+            $alive = (($now - [int64]$b.since) -lt $MaxAgeMs) -and
+                ([int]$b.pid -eq 0 -or $null -ne (Get-Process -Id ([int]$b.pid) -ErrorAction SilentlyContinue))
+            $transcript = [string]$b.transcript
+            if ($alive -and $transcript -and (Test-Path -LiteralPath $transcript)) {
+                # (not $quietMs: variable names are case-insensitive, it would replace the parameter)
+                $silentMs = ([DateTime]::UtcNow - (Get-Item -LiteralPath $transcript).LastWriteTimeUtc).TotalMilliseconds
+                if ($silentMs -gt $QuietMs) { $alive = $false }
+            }
+        } catch {}
+        if ($alive) {
+            [pscustomobject]@{ id = $f.BaseName; pid = [int]$b.pid; since = [int64]$b.since; cwd = [string]$b.cwd; transcript = [string]$b.transcript }
+        }
+        else { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+# "Do not disturb" is the file dnd.flag in the data folder: hook.ps1 reads it to send requests to
+# VS Code, and the widget reads it to hide itself
+function Test-Dnd([string]$Dir) { Test-Path -LiteralPath (Join-Path $Dir 'dnd.flag') }
+
+function Set-Dnd([string]$Dir, [bool]$On) {
+    try {
+        $path = Join-Path $Dir 'dnd.flag'
+        if ($On) {
+            [void][IO.Directory]::CreateDirectory($Dir)
+            [IO.File]::WriteAllText($path, '')
+        }
+        else { [IO.File]::Delete($path) }
+    } catch {}
+}

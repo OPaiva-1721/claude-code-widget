@@ -181,6 +181,27 @@ Describe 'hook.ps1 end to end' {
         }
     }
 
+    Context 'do not disturb' {
+        BeforeEach { Set-Dnd $box.Data $true }
+        It 'sends permission requests straight to VS Code' {
+            $evt = New-HookEvent 'PermissionRequest' $box.Data @{ tool_name = 'Bash'; tool_input = @{ command = 'ls' } }
+            $r = Complete-Hook (Start-Hook $box $evt)
+            $r.Stdout | Should -BeNullOrEmpty
+            (Get-QueueFiles $box 'req-*.json').Count | Should -Be 0
+        }
+        It 'sends questions straight to VS Code' {
+            $evt = New-HookEvent 'PreToolUse' $box.Data @{ tool_name = 'AskUserQuestion'; tool_input = @{ questions = @(@{ question = 'Q?'; header = 'Q'; multiSelect = $false; options = @(@{ label = 'A'; description = '' }) }) } }
+            $r = Complete-Hook (Start-Hook $box $evt)
+            $r.Stdout | Should -BeNullOrEmpty
+            (Get-QueueFiles $box 'req-*.json').Count | Should -Be 0
+        }
+        It 'still writes the finished notice' {
+            $stop = New-HookEvent 'Stop' $box.Data @{ last_assistant_message = 'ok' }
+            [void](Complete-Hook (Start-Hook $box $stop))
+            (Get-QueueFiles $box "done-$($stop.session_id)-*.json").Count | Should -Be 1
+        }
+    }
+
     # After a plugin update the old widget keeps running from the old folder; the hook finds it through
     # the shared mutex name and widget.json, and replaces it. The test keeps holding the mutex, so the
     # widget the hook starts in its place finds the mutex taken and exits at once (no window).
