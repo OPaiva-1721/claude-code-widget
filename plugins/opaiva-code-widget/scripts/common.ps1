@@ -264,3 +264,17 @@ function Set-Dnd([string]$Dir, [bool]$On) {
         else { [IO.File]::Delete($path) }
     } catch {}
 }
+
+# "project . session title" for chips and the sessions list: the title is cut at 40 characters
+# (without splitting an emoji); either part may be missing
+function Format-SessionLine([string]$Cwd, [string]$Title) {
+    $text = if ($Cwd) { Split-Path -Leaf $Cwd } else { '' }
+    $title = if ($Title) { $Title.Trim() } else { '' }
+    if ($title.Length -gt 40) {
+        $cut = 39
+        if ([char]::IsHighSurrogate($title[$cut - 1])) { $cut = 38 }
+        $title = $title.Substring(0, $cut) + '...'
+    }
+    if ($title) { $text = if ($text) { $text + ' ' + [char]0x00B7 + ' ' + $title } else { $title } }
+    return $text
+}

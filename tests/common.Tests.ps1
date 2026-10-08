@@ -384,3 +384,29 @@ Describe 'Test-Dnd and Set-Dnd' {
         { Set-Dnd $dir $false; Set-Dnd $dir $false } | Should -Not -Throw
     }
 }
+
+Describe 'Format-SessionLine' {
+    BeforeAll { $dot = [string][char]0x00B7 }
+    It 'joins project and title' {
+        Format-SessionLine 'C:\dev\my-app' 'Fix the login' | Should -BeExactly "my-app $dot Fix the login"
+    }
+    It 'shows only the project without a title' {
+        Format-SessionLine 'C:\dev\my-app' '' | Should -BeExactly 'my-app'
+        Format-SessionLine 'C:\dev\my-app' $null | Should -BeExactly 'my-app'
+    }
+    It 'shows only the title without a project' {
+        Format-SessionLine '' 'Fix the login' | Should -BeExactly 'Fix the login'
+    }
+    It 'is empty without both' {
+        Format-SessionLine '' '' | Should -BeExactly ''
+    }
+    It 'cuts a long title at 40 characters' {
+        $title = 'x' * 60
+        (Format-SessionLine 'C:\dev\a' $title) | Should -BeExactly ("a $dot " + ('x' * 39) + '...')
+    }
+    It 'does not split a surrogate pair when cutting' {
+        $title = ('x' * 38) + [char]::ConvertFromUtf32(0x1F600) + 'yyyy'
+        $line = Format-SessionLine '' $title
+        $line | Should -BeExactly (('x' * 38) + '...')
+    }
+}

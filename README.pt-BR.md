@@ -12,6 +12,8 @@ Quando não há nada para mostrar, ele vira uma pílula pequena, que dá para ar
 
 <img src="docs/images/pt/idle.png" width="235" alt="Pílula ociosa: Claude Code · sem pedidos">
 
+<img src="docs/images/pt/sessions.png" width="300" alt="Pílula parada com a lista de sessões trabalhando aberta">
+
 <table>
   <tr>
     <td valign="top">

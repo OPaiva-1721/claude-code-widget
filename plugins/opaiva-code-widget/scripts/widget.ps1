@@ -199,10 +199,13 @@ namespace ClaudeWidget {
     <Border.Effect><DropShadowEffect BlurRadius="20" ShadowDepth="3" Opacity="0.5" Color="Black"/></Border.Effect>
     <Grid>
 
-      <StackPanel x:Name="IdlePanel" Orientation="Horizontal" Margin="14,9,16,9" Background="Transparent">
-        <Ellipse Width="8" Height="8" Fill="#5FB98A" VerticalAlignment="Center" Margin="0,0,9,0"/>
-        <TextBlock Text="Claude Code" Foreground="#E8E8EC" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
-        <TextBlock x:Name="IdleText" Foreground="#7E7E88" FontSize="12" VerticalAlignment="Center"/>
+      <StackPanel x:Name="IdlePanel" Orientation="Vertical" Margin="14,9,16,9" Background="Transparent">
+        <StackPanel Orientation="Horizontal">
+          <Ellipse Width="8" Height="8" Fill="#5FB98A" VerticalAlignment="Center" Margin="0,0,9,0"/>
+          <TextBlock Text="Claude Code" Foreground="#E8E8EC" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          <TextBlock x:Name="IdleText" Foreground="#7E7E88" FontSize="12" VerticalAlignment="Center"/>
+        </StackPanel>
+        <StackPanel x:Name="SessionsList" Margin="0,8,0,0" Visibility="Collapsed"/>
       </StackPanel>
 
       <StackPanel x:Name="ReqPanel" Width="440" Margin="20,16,20,18" Visibility="Collapsed">
@@ -314,7 +317,7 @@ namespace ClaudeWidget {
 
     $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml))
     $ui = @{}
-    foreach ($n in 'Card', 'IdlePanel', 'IdleText', 'ReqPanel', 'ReqTitle', 'QPanel', 'QTitle', 'DonePanel', 'DoneTitle',
+    foreach ($n in 'Card', 'IdlePanel', 'IdleText', 'SessionsList', 'ReqPanel', 'ReqTitle', 'QPanel', 'QTitle', 'DonePanel', 'DoneTitle',
         'ReqDot', 'Countdown', 'Tool', 'ProjectChip', 'Project', 'QueueChip', 'QueueText', 'Desc', 'Detail', 'Cwd',
         'BtnApprove', 'BtnDeny', 'BtnVs', 'QCountdown', 'QDot', 'QProjectChip', 'QProject', 'QQueueChip', 'QQueueText',
         'QList', 'BtnAnswer', 'BtnQVs', 'DoneAgo', 'DoneProjectChip', 'DoneProject', 'DoneMoreChip', 'DoneMoreText',
@@ -388,8 +391,9 @@ namespace ClaudeWidget {
         $left = $win.Left
         $top = $win.Top
         try { $win.DragMove() } catch {}
-        # A click without a move keeps the saved spot (its monitor may be unplugged right now)
-        if ($win.Left -eq $left -and $win.Top -eq $top) { return }
+        # A click without a move keeps the saved spot (its monitor may be unplugged right now);
+        # on the idle pill it opens or closes the sessions list
+        if ($win.Left -eq $left -and $win.Top -eq $top) { Switch-Sessions; return }
         $script:anchorRight = $win.Left + $win.ActualWidth
         $script:anchorBottom = $win.Top + $win.ActualHeight
         $script:savedAnchor = @{ right = $script:anchorRight; bottom = $script:anchorBottom }
@@ -452,6 +456,7 @@ namespace ClaudeWidget {
             $v = if ($p -eq $name) { 'Visible' } else { 'Collapsed' }
             if ($ui[$p].Visibility -ne $v) { $ui[$p].Visibility = $v }
         }
+        if ($name -ne 'IdlePanel') { $script:sessionsOpen = $false; $ui.SessionsList.Visibility = 'Collapsed' }
     }
 
     function Invoke-Attention([string]$key, [scriptblock]$sound) {
@@ -477,12 +482,8 @@ namespace ClaudeWidget {
         else { $chip.Visibility = 'Collapsed' }
     }
 
-    # "project . session title" (the title cut at 40 characters); either part may be missing
     function Set-ProjectChip($chip, $textBlock, $item) {
-        $text = if ($item.cwd) { Split-Path -Leaf ([string]$item.cwd) } else { '' }
-        $title = ([string]$item.title).Trim()
-        if ($title.Length -gt 40) { $title = $title.Substring(0, 39) + '...' }
-        if ($title) { $text = if ($text) { $text + ' ' + [char]0x00B7 + ' ' + $title } else { $title } }
+        $text = Format-SessionLine ([string]$item.cwd) ([string]$item.title)
         $textBlock.Text = $text
         $chip.Visibility = if ($text) { 'Visible' } else { 'Collapsed' }
     }
@@ -721,10 +722,81 @@ namespace ClaudeWidget {
     }
 
     # ---------------- Views ----------------
+    # --- Sessions list on the idle pill ---
+    $script:sessionsOpen = $false
+    $script:titles = @{}        # session id -> @{ at; text }
+    $script:sessionRows = @()
+    $script:sessionsAt = 0
+    # Working sessions, with their title (re-read at most every 15 s, only while the list is open)
+    # and whether a request from their project is waiting for you
+    function Get-SessionRows {
+        $busy = @(Get-BusySessions (Join-Path $Data 'busy') (12 * 3600 * 1000) (15 * 60 * 1000))
+        $waiting = @{}
+        foreach ($r in @(Get-Pending)) { $waiting[[string]$r.cwd] = $true }
+        foreach ($b in $busy) {
+            $c = $script:titles[$b.id]
+            if ($script:sessionsOpen -and (-not $c -or ((Get-NowMs) - $c.at) -gt 15000)) {
+                $c = @{ at = Get-NowMs; text = (Get-SessionTitle $b.transcript $b.id) }
+                $script:titles[$b.id] = $c
+            }
+            [pscustomobject]@{ cwd = $b.cwd; title = $(if ($c) { $c.text } else { '' }); since = $b.since; waiting = $waiting.ContainsKey($b.cwd) }
+        }
+    }
+    # Pill text ("no requests" / "N working") and, while open, one row per session (at most 8)
+    function Set-SessionRows($rows) {
+        $rows = @($rows)
+        $script:sessionRows = $rows
+        $ui.IdleText.Text = $Sep + $(if ($rows.Count -eq 0) { $S.idle } elseif ($rows.Count -eq 1) { $S.workingOne } else { $S.workingMany -f $rows.Count })
+        if ($rows.Count -eq 0) { $script:sessionsOpen = $false }
+        $list = $ui.SessionsList
+        $list.Children.Clear()
+        $list.Visibility = if ($script:sessionsOpen) { 'Visible' } else { 'Collapsed' }
+        if (-not $script:sessionsOpen) { return }
+        foreach ($r in @($rows | Select-Object -First 8)) {
+            $row = New-Object System.Windows.Controls.DockPanel
+            $row.Margin = '0,3,0,3'
+            $dot = New-Object System.Windows.Shapes.Ellipse
+            $dot.Width = 7
+            $dot.Height = 7
+            $dot.Margin = '0,0,8,0'
+            $dot.VerticalAlignment = 'Center'
+            $dot.Fill = Get-Brush $(if ($r.waiting) { '#D97757' } else { '#5FB98A' })
+            [System.Windows.Controls.DockPanel]::SetDock($dot, 'Left')
+            $mins = [int][math]::Floor(((Get-NowMs) - [int64]$r.since) / 60000)
+            $age = New-TextBlock $(if ($mins -lt 1) { $S.now } else { $S.minutesAgo -f $mins }) 11.5 '#7E7E88'
+            $age.Margin = '14,0,0,0'
+            $age.VerticalAlignment = 'Center'
+            [System.Windows.Controls.DockPanel]::SetDock($age, 'Right')
+            $name = New-TextBlock (Format-SessionLine ([string]$r.cwd) ([string]$r.title)) 12 '#C8C8D0'
+            $name.TextWrapping = 'NoWrap'
+            $name.VerticalAlignment = 'Center'
+            [void]$row.Children.Add($dot)
+            [void]$row.Children.Add($age)
+            [void]$row.Children.Add($name)
+            [void]$list.Children.Add($row)
+        }
+        if ($rows.Count -gt 8) {
+            [void]$list.Children.Add((New-TextBlock ($S.sessionsMore -f ($rows.Count - 8)) 11.5 '#7E7E88'))
+        }
+    }
+    function Update-Sessions { Set-SessionRows @(Get-SessionRows) }
+    # A click on the idle pill opens or closes the list
+    function Switch-Sessions {
+        if ($ui.IdlePanel.Visibility -ne 'Visible' -or $script:sessionRows.Count -eq 0) { return }
+        $script:sessionsOpen = -not $script:sessionsOpen
+        $script:sessionsAt = 0
+        Update-Sessions
+    }
     function Show-Idle {
+        $wasIdle = $ui.IdlePanel.Visibility -eq 'Visible'
         $script:current = $null
         $script:currentDone = $null
         Set-Panel 'IdlePanel'
+        # Re-read the sessions every ~2 s, not on every 400 ms tick
+        if (-not $wasIdle -or ((Get-NowMs) - $script:sessionsAt) -gt 2000) {
+            $script:sessionsAt = Get-NowMs
+            Update-Sessions
+        }
     }
 
     function Show-Request($r, [int]$total) {
@@ -969,6 +1041,15 @@ namespace ClaudeWidget {
 
         Show-Idle
         Save-Png $frame (Join-Path $OutDir 'idle.png')
+
+        $script:sessionsOpen = $true
+        $rows = foreach ($row in @($sample.sessions)) {
+            [pscustomobject]@{ cwd = [string]$row.cwd; title = [string]$row.title; since = $now - [int64]$row.minutes * 60000; waiting = [bool]$row.waiting }
+        }
+        Set-SessionRows $rows
+        Save-Png $frame (Join-Path $OutDir 'sessions.png')
+        $script:sessionsOpen = $false
+        Set-SessionRows @()
 
         $p = $sample.permission
         $p | Add-Member -NotePropertyName id -NotePropertyValue 'sample-permission' -Force

@@ -12,6 +12,8 @@ When there is nothing to show, it shrinks to a small pill that you can drag anyw
 
 <img src="docs/images/en/idle.png" width="230" alt="Idle pill: Claude Code · no requests">
 
+<img src="docs/images/en/sessions.png" width="300" alt="Idle pill with the list of working sessions open">
+
 <table>
   <tr>
     <td valign="top">

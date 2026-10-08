@@ -43,7 +43,7 @@ Describe 'widget.ps1 rendering' -Tag 'Desktop' {
         $out = Join-Path $TestDrive $lang
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $widget -RenderSamples $samples -OutDir $out -Lang $lang
         $LASTEXITCODE | Should -Be 0
-        foreach ($name in 'idle', 'permission', 'question', 'done') {
+        foreach ($name in 'idle', 'sessions', 'permission', 'question', 'done') {
             $png = Join-Path $out "$name.png"
             $png | Should -Exist
             (Get-Item -LiteralPath $png).Length | Should -BeGreaterThan 1024
