@@ -486,3 +486,18 @@ Describe 'ConvertTo-Hotkey' {
         ConvertTo-Hotkey $text | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Format-RuleText' {
+    It 'writes a rule object as Tool(content) or just Tool' {
+        Format-RuleText ([pscustomobject]@{ toolName = 'Bash'; ruleContent = 'npm test *' }) | Should -BeExactly 'Bash(npm test *)'
+        Format-RuleText ([pscustomobject]@{ toolName = 'Read' }) | Should -BeExactly 'Read'
+        Format-RuleText ([pscustomobject]@{ toolName = 'Read'; ruleContent = '' }) | Should -BeExactly 'Read'
+    }
+    It 'keeps a rule that is already a string' {
+        Format-RuleText 'Bash(git *)' | Should -BeExactly 'Bash(git *)'
+    }
+    It 'never throws on odd input' {
+        { Format-RuleText $null; Format-RuleText 42; Format-RuleText @(1, 2); Format-RuleText ([pscustomobject]@{ other = 1 }) } | Should -Not -Throw
+        Format-RuleText $null | Should -BeExactly ''
+    }
+}

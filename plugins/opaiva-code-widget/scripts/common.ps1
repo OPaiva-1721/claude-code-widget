@@ -331,3 +331,17 @@ function ConvertTo-Hotkey([string]$Text) {
     if ($vk -eq 0 -or ($mod -band 0xF) -eq 0) { return $null }
     return @{ mod = $mod; vk = $vk }
 }
+
+# A permission rule as Claude Code writes it: Tool(content), or just Tool. Rules arrive as objects
+# { toolName; ruleContent } (a plain string is kept as it is). Never throws; unknown input gives ''.
+function Format-RuleText($Rule) {
+    try {
+        if ($null -eq $Rule) { return '' }
+        if ($Rule -is [string]) { return $Rule }
+        $tool = [string]$Rule.toolName
+        if (-not $tool) { return '' }
+        $content = [string]$Rule.ruleContent
+        if ($content) { return "$tool($content)" }
+        return $tool
+    } catch { return '' }
+}

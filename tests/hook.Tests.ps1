@@ -281,26 +281,29 @@ Describe 'New-ChangeInfo' {
 Describe 'Get-OfferedSuggestions' {
     It 'keeps allow rules, safe modes and directories, with their original index' {
         $list = '[
-          {"type":"addRules","rules":["Bash(npm test *)"],"behavior":"allow","destination":"session","mode":null},
+          {"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"npm test *"}],"behavior":"allow","destination":"session","mode":null},
           {"type":"setMode","behavior":"allow","destination":"session","mode":"acceptEdits"},
           {"type":"addDirectories","directories":["C:\\other"],"destination":"session"}]' | ConvertFrom-Json
         $out = @(Get-OfferedSuggestions $list)
         $out.Count | Should -Be 3
         ($out | ForEach-Object { $_.index }) -join ',' | Should -BeExactly '0,1,2'
-        $out[0].rules[0] | Should -BeExactly 'Bash(npm test *)'
+        $out[0].rules[0].toolName | Should -BeExactly 'Bash'
+        $out[0].rules[0].ruleContent | Should -BeExactly 'npm test *'
         $out[1].mode | Should -BeExactly 'acceptEdits'
         $out[2].directories[0] | Should -BeExactly 'C:\other'
     }
-    It 'drops removeRules, replaceRules, deny and bypassPermissions' {
+    It 'drops removeRules, replaceRules, deny, ask, defer and bypassPermissions' {
         $list = '[
-          {"type":"removeRules","rules":["Bash(*)"],"behavior":"allow","destination":"userSettings"},
-          {"type":"replaceRules","rules":["Bash(*)"],"behavior":"allow","destination":"userSettings"},
-          {"type":"addRules","rules":["Bash(rm *)"],"behavior":"deny","destination":"session"},
+          {"type":"removeRules","rules":[{"toolName":"Bash"}],"behavior":"allow","destination":"userSettings"},
+          {"type":"replaceRules","rules":[{"toolName":"Bash"}],"behavior":"allow","destination":"userSettings"},
+          {"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"rm *"}],"behavior":"deny","destination":"session"},
+          {"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"ls"}],"behavior":"ask","destination":"session"},
+          {"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"pwd"}],"behavior":"defer","destination":"session"},
           {"type":"setMode","behavior":"allow","destination":"session","mode":"bypassPermissions"},
-          {"type":"addRules","rules":["Read(*)"],"behavior":"allow","destination":"session"}]' | ConvertFrom-Json
+          {"type":"addRules","rules":[{"toolName":"Read"}],"behavior":"allow","destination":"session"}]' | ConvertFrom-Json
         $out = @(Get-OfferedSuggestions $list)
         $out.Count | Should -Be 1
-        $out[0].index | Should -Be 4
+        $out[0].index | Should -Be 6
     }
     It 'drops rules without rules and directories without directories' {
         $list = '[{"type":"addRules","rules":[],"behavior":"allow"},{"type":"addDirectories","directories":[]}]' | ConvertFrom-Json
@@ -313,17 +316,17 @@ Describe 'Get-OfferedSuggestions' {
 
 Describe 'ConvertTo-UpdatedPermission and New-PermissionOutput' {
     It 'keeps the suggestion as it came, without a null mode' {
-        $s = '{"type":"addRules","rules":["Bash(git *)"],"behavior":"allow","destination":"projectSettings","mode":null}' | ConvertFrom-Json
+        $s = '{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"git *"}],"behavior":"allow","destination":"projectSettings","mode":null}' | ConvertFrom-Json
         ConvertTo-UpdatedPermission $s | ConvertTo-Json -Compress |
-            Should -BeExactly '{"type":"addRules","rules":["Bash(git *)"],"behavior":"allow","destination":"projectSettings"}'
+            Should -BeExactly '{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"git *"}],"behavior":"allow","destination":"projectSettings"}'
     }
     It 'keeps the mode of a setMode suggestion' {
         $s = '{"type":"setMode","behavior":"allow","destination":"session","mode":"acceptEdits"}' | ConvertFrom-Json
         (ConvertTo-UpdatedPermission $s).mode | Should -BeExactly 'acceptEdits'
     }
     It 'adds updatedPermissions to the allow decision' {
-        $s = '{"type":"addRules","rules":["Bash(git *)"],"behavior":"allow","destination":"session"}' | ConvertFrom-Json
+        $s = '{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"git *"}],"behavior":"allow","destination":"session"}' | ConvertFrom-Json
         $out = New-PermissionOutput 'allow' '' @(ConvertTo-UpdatedPermission $s)
-        ConvertTo-AsciiJson $out | Should -BeExactly '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"addRules","rules":["Bash(git *)"],"behavior":"allow","destination":"session"}]}}}'
+        ConvertTo-AsciiJson $out | Should -BeExactly '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"git *"}],"behavior":"allow","destination":"session"}]}}}'
     }
 }

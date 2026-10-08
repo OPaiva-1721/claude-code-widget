@@ -101,7 +101,10 @@
           "index": 0,
           "type": "addRules",
           "rules": [
-            "Edit(src/**)"
+            {
+              "toolName": "Edit",
+              "ruleContent": "src/**"
+            }
           ],
           "destination": "session",
           "mode": "",
@@ -220,7 +223,10 @@
           "index": 0,
           "type": "addRules",
           "rules": [
-            "Edit(src/**)"
+            {
+              "toolName": "Edit",
+              "ruleContent": "src/**"
+            }
           ],
           "destination": "session",
           "mode": "",

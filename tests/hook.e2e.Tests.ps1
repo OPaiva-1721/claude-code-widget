@@ -57,8 +57,8 @@ Describe 'hook.ps1 end to end' {
                         tool_input = @{ file_path = 'C:\dev\a.ps1'; old_string = "keep`nold"; new_string = "keep`nnew" }
                     }
                     $e.permission_suggestions = @(
-                        @{ type = 'removeRules'; rules = @('Bash(*)'); behavior = 'allow'; destination = 'userSettings' },
-                        @{ type = 'addRules'; rules = @('Edit(src/**)'); behavior = 'allow'; destination = 'session'; mode = $null },
+                        @{ type = 'removeRules'; rules = @([ordered]@{ toolName = 'Bash' }); behavior = 'allow'; destination = 'userSettings' },
+                        [ordered]@{ type = 'addRules'; rules = @([ordered]@{ toolName = 'Edit'; ruleContent = 'src/**' }); behavior = 'allow'; destination = 'session'; mode = $null },
                         @{ type = 'setMode'; behavior = 'allow'; destination = 'session'; mode = 'acceptEdits' })
                     return $e
                 }
@@ -70,7 +70,8 @@ Describe 'hook.ps1 end to end' {
                 $req.change.edits[0].old | Should -BeExactly "keep`nold"
                 @($req.suggestions).Count | Should -Be 2
                 $req.suggestions[0].index | Should -Be 1
-                $req.suggestions[0].rules[0] | Should -BeExactly 'Edit(src/**)'
+                $req.suggestions[0].rules[0].toolName | Should -BeExactly 'Edit'
+                $req.suggestions[0].rules[0].ruleContent | Should -BeExactly 'src/**'
                 $req.suggestions[1].index | Should -Be 2
                 Send-WidgetResponse $box $req.id @{ decision = 'vscode' }
                 [void](Complete-Hook $run)
@@ -80,7 +81,7 @@ Describe 'hook.ps1 end to end' {
                 $req = Wait-HookRequest $box
                 Send-WidgetResponse $box $req.id @{ decision = 'allowAlways'; index = 1 }
                 $r = Complete-Hook $run
-                $r.Stdout | Should -BeExactly '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"addRules","rules":["Edit(src/**)"],"behavior":"allow","destination":"session"}]}}}'
+                $r.Stdout | Should -BeExactly '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"addRules","rules":[{"toolName":"Edit","ruleContent":"src/**"}],"behavior":"allow","destination":"session"}]}}}'
             }
             It 'allowAlways with an index that was not offered only allows' {
                 foreach ($bad in 0, 7, -1) {
@@ -94,7 +95,7 @@ Describe 'hook.ps1 end to end' {
             It 'ignores suggestion content in the response: only the index counts' {
                 $run = Start-Hook $box (New-EditEvent $box)
                 $req = Wait-HookRequest $box
-                Send-WidgetResponse $box $req.id @{ decision = 'allowAlways'; index = 'abc'; type = 'addRules'; rules = @('Bash(*)'); destination = 'userSettings' }
+                Send-WidgetResponse $box $req.id @{ decision = 'allowAlways'; index = 'abc'; type = 'addRules'; rules = @([ordered]@{ toolName = 'Bash' }); destination = 'userSettings' }
                 $r = Complete-Hook $run
                 $r.Stdout | Should -BeExactly '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
             }

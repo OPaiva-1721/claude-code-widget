@@ -388,8 +388,9 @@ function Get-OfferedSuggestions($Suggestions) {
         if (-not $s) { continue }
         $ok = $false
         switch ([string]$s.type) {
-            'addRules' { $ok = ([string]$s.behavior -ne 'deny') -and (@($s.rules).Count -gt 0) }
-            'setMode' { $ok = ([string]$s.behavior -ne 'deny') -and ([string]$s.mode -in @('default', 'plan', 'acceptEdits', 'auto', 'dontAsk')) }
+            # Only rules that allow: Claude Code also suggests deny/ask/defer rules, which are not "Always allow"
+            'addRules' { $ok = ([string]$s.behavior -ceq 'allow') -and (@($s.rules).Count -gt 0) }
+            'setMode' { $ok = [string]$s.mode -in @('default', 'plan', 'acceptEdits', 'auto', 'dontAsk') }
             'addDirectories' { $ok = @($s.directories).Count -gt 0 }
         }
         if ($ok) {
@@ -405,7 +406,12 @@ function ConvertTo-UpdatedPermission($Suggestion) {
     $o = [ordered]@{}
     foreach ($name in 'type', 'rules', 'behavior', 'destination', 'mode', 'directories') {
         $p = $Suggestion.PSObject.Properties[$name]
-        if ($p -and $null -ne $p.Value -and -not ($p.Value -is [array] -and $p.Value.Count -eq 0) -and [string]$p.Value -ne '') { $o[$name] = $p.Value }
+        if (-not $p -or $null -eq $p.Value) { continue }
+        $v = $p.Value
+        # (an array of rule objects must not be tested through [string]: it converts to '')
+        if ($v -is [string]) { if ($v -eq '') { continue } }
+        elseif ($v -is [array] -and $v.Count -eq 0) { continue }
+        $o[$name] = $v
     }
     return $o
 }

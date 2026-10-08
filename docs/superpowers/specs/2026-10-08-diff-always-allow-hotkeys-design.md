@@ -10,7 +10,10 @@ Data: 2026-10-08 · Versão alvo: 2.3.0 · Status: aguardando revisão
 2. **"Sempre permitir":** botões que aprovam e gravam, ao mesmo tempo, uma das regras que o próprio Claude Code sugere (as mesmas do menu dele no VS Code).
 3. **Atalhos globais:** aprovar, negar e ligar/desligar o "não perturbe" com o teclado, com qualquer janela em foco.
 
-## Formato do "Sempre permitir" (confirmado na documentação do Claude Code)
+## Formato do "Sempre permitir"
+
+**Correção feita na revisão final:** a leitura inicial da documentação mostrava `rules` como lista de textos (`"Bash(rm *)"`). O formato real, conferido no esquema do binário do Claude Code 2.1.292 (`addRules: { rules: [{ toolName, ruleContent? }], behavior: allow|deny|ask|defer, destination }`), é uma lista de **objetos** `{ toolName, ruleContent }`. O resto desta seção e o código usam o formato real; os exemplos com texto abaixo são só ilustrativos.
+
 
 - O evento `PermissionRequest` traz `permission_suggestions`: lista de objetos `{ type, rules, behavior, destination, mode, directories }`. Exemplo da documentação: `{"type":"addRules","rules":["Bash(rm *)"],"behavior":"allow","destination":"session","mode":null}` e `{"type":"setMode","behavior":"allow","destination":"session","mode":"auto"}`.
 - A resposta do hook, para aprovar e gravar: `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"addRules","rules":["Bash(git *)"],"destination":"projectSettings"}]}}}`.

@@ -547,13 +547,16 @@ namespace ClaudeWidget {
             $what = switch ([string]$sg.type) {
                 'addRules' {
                     $rules = @($sg.rules)
-                    $S.alwaysRule -f ($rules[0] + $(if ($rules.Count -gt 1) { ' ' + ($S.alwaysMore -f ($rules.Count - 1)) } else { '' }))
+                    $S.alwaysRule -f ((Format-RuleText $rules[0]) + $(if ($rules.Count -gt 1) { ' ' + ($S.alwaysMore -f ($rules.Count - 1)) } else { '' }))
                 }
                 'setMode' {
                     $key = 'mode' + ([string]$sg.mode).Substring(0, 1).ToUpperInvariant() + ([string]$sg.mode).Substring(1)
                     $S.alwaysMode -f $(if ($S.PSObject.Properties[$key]) { $S.$key } else { [string]$sg.mode })
                 }
-                'addDirectories' { $S.alwaysDir -f @($sg.directories)[0] }
+                'addDirectories' {
+                    $dirs = @($sg.directories)
+                    $S.alwaysDir -f ([string]$dirs[0] + $(if ($dirs.Count -gt 1) { ' ' + ($S.alwaysMore -f ($dirs.Count - 1)) } else { '' }))
+                }
                 default { '' }
             }
             if (-not $what) { continue }
@@ -584,8 +587,9 @@ namespace ClaudeWidget {
         $ui.Desc.Text = [string]$r.description
         $ui.Detail.Text = [string]$r.detail
         $ui.Detail.ScrollToHome()
-        Set-ChangeView $r.change
-        Set-AlwaysButtons $r
+        # The extras must never keep the card itself from showing
+        try { Set-ChangeView $r.change } catch { Write-Log $_; $ui.ChangeBox.Visibility = 'Collapsed' }
+        try { Set-AlwaysButtons $r } catch { Write-Log $_; $ui.AlwaysList.Children.Clear(); $ui.AlwaysList.Visibility = 'Collapsed' }
         Set-Panel 'ReqPanel'
         Invoke-Attention $r.id { [System.Media.SystemSounds]::Asterisk.Play() }
     }
