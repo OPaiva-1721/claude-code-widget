@@ -2,6 +2,9 @@
 #   rendering draws every card to PNG (no window is shown);
 #   the queue test starts a real widget for a few seconds (an idle pill appears in a corner).
 BeforeAll {
+    # No tray icon for the widgets these tests start (and kill): they would leave ghost icons behind
+    $savedNoTray = $env:CLAUDE_WIDGET_NO_TRAY
+    $env:CLAUDE_WIDGET_NO_TRAY = '1'
     $repo = Split-Path -Parent $PSScriptRoot
     $widget = Join-Path $repo 'plugins\opaiva-code-widget\scripts\widget.ps1'
     $samples = Join-Path $repo 'tools\samples.json'
@@ -37,6 +40,7 @@ namespace CcwTest {
 '@
     }
 }
+AfterAll { $env:CLAUDE_WIDGET_NO_TRAY = $savedNoTray }
 
 Describe 'widget.ps1 rendering' -Tag 'Desktop' {
     It 'draws every card in <lang>' -ForEach @(@{ lang = 'en' }, @{ lang = 'pt' }) {
@@ -137,6 +141,46 @@ Describe 'widget.ps1 do not disturb' -Tag 'Desktop' {
             Set-Dnd $data $true
             (Wait-Until { (Get-VisibleCount $proc.Id) -eq 0 }) | Should -BeTrue
             Join-Path $data 'widget.log' | Should -Not -Exist
+        }
+        finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            [void]$proc.WaitForExit(5000)
+            Remove-Item -LiteralPath $data -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe 'widget.ps1 quit request' -Tag 'Desktop' {
+    It 'closes by itself when quit.flag appears, and removes the flag' {
+        $data = Join-Path ([IO.Path]::GetTempPath()) ('ccw-widget-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $data 'queue') | Out-Null
+        $proc = Start-Process powershell.exe -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+            '-File', ('"{0}"' -f $widget), '-DataDir', ('"{0}"' -f $data), '-Lang', 'en'
+        try {
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath (Join-Path $data 'widget.json'))) { Start-Sleep -Milliseconds 250 }
+            Join-Path $data 'widget.json' | Should -Exist
+            [IO.File]::WriteAllText((Join-Path $data 'quit.flag'), '')
+            $proc.WaitForExit(10000) | Should -BeTrue
+            Join-Path $data 'quit.flag' | Should -Not -Exist
+        }
+        finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            [void]$proc.WaitForExit(5000)
+            Remove-Item -LiteralPath $data -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It 'ignores a quit.flag left over from before it started' {
+        $data = Join-Path ([IO.Path]::GetTempPath()) ('ccw-widget-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $data 'queue') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $data 'quit.flag'), '')
+        $proc = Start-Process powershell.exe -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+            '-File', ('"{0}"' -f $widget), '-DataDir', ('"{0}"' -f $data), '-Lang', 'en'
+        try {
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath (Join-Path $data 'widget.json'))) { Start-Sleep -Milliseconds 250 }
+            Start-Sleep -Seconds 3
+            $proc.HasExited | Should -BeFalse
         }
         finally {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue

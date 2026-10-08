@@ -233,6 +233,22 @@ Describe 'hook.ps1 end to end' {
             # The widget started in its place sees the mutex still taken (by the test) and steps aside
             Wait-SandboxWidgetsExit $box | Should -BeTrue
         }
+        It 'asks the old widget to quit before killing it' {
+            # A stand-in that leaves by itself (exit code 0) when quit.flag appears; a kill would give -1
+            $flag = Join-Path $box.Data 'quit.flag'
+            $polite = Start-Process powershell.exe -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command',
+                ('$f = ''{0}''; $end = (Get-Date).AddSeconds(60); while ((Get-Date) -lt $end) {{ if (Test-Path -LiteralPath $f) {{ exit 0 }}; Start-Sleep -Milliseconds 100 }}; exit 5' -f $flag)
+            try {
+                Write-JsonAtomic (Join-Path $box.Data 'widget.json') @{ pid = $polite.Id; script = 'C:\old\1.1.0\scripts\widget.ps1' }
+                $r = Complete-Hook (Start-Hook $box (New-HookEvent 'SessionStart' $box.Data @{ source = 'startup' }))
+                $r.ExitCode | Should -Be 0
+                $polite.WaitForExit(10000) | Should -BeTrue
+                $polite.ExitCode | Should -Be 0
+                $flag | Should -Not -Exist
+                Wait-SandboxWidgetsExit $box | Should -BeTrue
+            }
+            finally { if (-not $polite.HasExited) { $polite.Kill() } }
+        }
         It 'keeps a widget started from this version' {
             $current = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $box.Hook) 'widget.ps1'))
             Write-JsonAtomic (Join-Path $box.Data 'widget.json') @{ pid = $fake.Id; script = $current }

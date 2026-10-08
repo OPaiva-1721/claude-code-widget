@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.1 (2026-10-08)
+
+- **No ghost tray icons after an update.** When a plugin update replaces the running widget, the hook now asks the old one to close itself (it removes its own tray icon) and only kills it if it has not left after 4 seconds. Before, every update left a dead icon in the tray until you hovered over it.
+- Internal: setting `CLAUDE_WIDGET_NO_TRAY=1` starts the widget without a tray icon; the test suite uses it so that running the tests no longer fills the tray with ghost icons.
+
 ## 2.2.0 (2026-10-08)
 
 - **Tray icon and "do not disturb".** A tray icon (orange while active, grey in "do not disturb") toggles the mode with a left click; its menu has **Do not disturb** and **Close widget**. In the mode, permission requests and questions go straight to VS Code, the widget hides, and "finished" notices wait silently until you turn the mode off. The mode stays on until you turn it off, even after a restart. If the icon is in the hidden-icons area, drag it onto the taskbar once.

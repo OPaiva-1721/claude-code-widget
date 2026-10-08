@@ -25,6 +25,8 @@ $Utf8 = New-Object System.Text.UTF8Encoding $false
 $Data = [IO.Path]::GetFullPath($DataDir).TrimEnd('\')
 $Queue = Join-Path $Data 'queue'
 $StatePath = Join-Path $Data 'state.json'
+# hook.ps1 creates this file to ask a widget from an older version to close itself (so its tray icon is removed)
+$QuitPath = Join-Path $Data 'quit.flag'
 $LogPath = Join-Path $Data 'widget.log'
 $DoneMaxAgeMs = 12 * 3600 * 1000
 
@@ -51,6 +53,8 @@ function Write-Log($msg) {
 try {
     if (-not $RenderMode) {
         New-Item -ItemType Directory -Force -Path $Queue | Out-Null
+        # A quit request meant for the widget that was running before this one
+        Remove-Item -LiteralPath $QuitPath -Force -ErrorAction SilentlyContinue
         # Lets hook.ps1 replace this widget after a plugin update (different script path)
         [IO.File]::WriteAllText((Join-Path $Data 'widget.json'), (@{ pid = $PID; script = $PSCommandPath } | ConvertTo-Json -Compress), $Utf8)
         # Responses and temp files from a previous run are useless now
@@ -968,39 +972,46 @@ namespace ClaudeWidget {
     }
     $script:dnd = $false
     $tray = $null
-    if (-not $RenderMode) {
-        $iconOn = New-DotIcon '#D97757'
-        $iconOff = New-DotIcon '#8A8A93'
-        $tray = New-Object System.Windows.Forms.NotifyIcon
-        $trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
-        $dndItem = $trayMenu.Items.Add($S.trayDnd)
-        $trayClose = $trayMenu.Items.Add($S.closeWidget)
-        $tray.ContextMenuStrip = $trayMenu
-        $tray.Icon = $iconOn
-        $tray.Text = $S.trayTip
-        function Sync-Dnd {
-            $on = Test-Dnd $Data
-            if ($on -eq $script:dnd) { return }
-            $script:dnd = $on
+    $iconOn = $null
+    $iconOff = $null
+    $dndItem = $null
+    function Sync-Dnd {
+        $on = Test-Dnd $Data
+        if ($on -eq $script:dnd) { return }
+        $script:dnd = $on
+        if ($tray) {
             $tray.Icon = if ($on) { $iconOff } else { $iconOn }
             $tray.Text = if ($on) { $S.trayTipDnd } else { $S.trayTip }
             $dndItem.Checked = $on
-            if ($on) {
-                # Whatever is on screen goes back to VS Code
-                foreach ($r in @(Get-Pending)) {
-                    try { Write-JsonAtomic (Join-Path $Queue "res-$($r.id).json") @{ decision = 'vscode' } } catch {}
-                }
-                $script:current = $null
-                $win.Hide()
-            }
-            else { $win.Show() }
         }
-        $toggleDnd = { Set-Dnd $Data (-not (Test-Dnd $Data)); Sync-Dnd }
-        $tray.Add_MouseClick({ param($src, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $toggleDnd } })
-        $dndItem.Add_Click({ & $toggleDnd })
-        $trayClose.Add_Click({ Close-Widget })
-        $tray.Visible = $true
-        # Hiding inside Loaded is undone when WPF finishes showing the window: hide a moment later
+        if ($on) {
+            # Whatever is on screen goes back to VS Code
+            foreach ($r in @(Get-Pending)) {
+                try { Write-JsonAtomic (Join-Path $Queue "res-$($r.id).json") @{ decision = 'vscode' } } catch {}
+            }
+            $script:current = $null
+            $win.Hide()
+        }
+        else { $win.Show() }
+    }
+    if (-not $RenderMode) {
+        # CLAUDE_WIDGET_NO_TRAY=1 (tests): no tray icon, so killed test widgets leave no ghost icons behind
+        if (-not $env:CLAUDE_WIDGET_NO_TRAY) {
+            $iconOn = New-DotIcon '#D97757'
+            $iconOff = New-DotIcon '#8A8A93'
+            $tray = New-Object System.Windows.Forms.NotifyIcon
+            $trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
+            $dndItem = $trayMenu.Items.Add($S.trayDnd)
+            $trayClose = $trayMenu.Items.Add($S.closeWidget)
+            $tray.ContextMenuStrip = $trayMenu
+            $tray.Icon = $iconOn
+            $tray.Text = $S.trayTip
+            $toggleDnd = { Set-Dnd $Data (-not (Test-Dnd $Data)); Sync-Dnd }
+            $tray.Add_MouseClick({ param($src, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $toggleDnd } })
+            $dndItem.Add_Click({ & $toggleDnd })
+            $trayClose.Add_Click({ Close-Widget })
+            $tray.Visible = $true
+        }
         $win.Add_Loaded({
             $once = New-Object System.Windows.Threading.DispatcherTimer
             $once.Interval = [TimeSpan]::FromMilliseconds(30)
@@ -1089,7 +1100,13 @@ namespace ClaudeWidget {
     $timer.Interval = [TimeSpan]::FromMilliseconds(400)
     $script:ticks = 0
     $timer.Add_Tick({
-        try { if ($tray) { Sync-Dnd } } catch { Write-Log $_ }
+        # A newer version of the plugin asks this widget to close itself (and take its tray icon with it)
+        if (Test-Path -LiteralPath $QuitPath) {
+            Remove-Item -LiteralPath $QuitPath -Force -ErrorAction SilentlyContinue
+            Close-Widget
+            return
+        }
+        try { Sync-Dnd } catch { Write-Log $_ }
         try { Update-View } catch { Write-Log $_ }
         # Every ~2 s: a monitor unplugged or back, a resolution change, the taskbar moved
         $script:ticks++
