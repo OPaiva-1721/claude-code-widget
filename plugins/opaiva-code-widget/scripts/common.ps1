@@ -278,3 +278,56 @@ function Format-SessionLine([string]$Cwd, [string]$Title) {
     if ($title) { $text = if ($text) { $text + ' ' + [char]0x00B7 + ' ' + $title } else { $title } }
     return $text
 }
+
+# Lines of text, with Windows or Unix line endings; an empty text has none
+function Split-TextLines([string]$Text) {
+    if (-not $Text) { return @() }
+    return @(($Text -replace "`r`n", "`n") -split "`n")
+}
+
+# What to show on a permission card for a file change: a list of { kind; text } with kind add, del
+# or more (text = how many lines were left out). An edit shows what left and what came in, without
+# the lines that are equal at the start and at the end; a written file shows all its lines as added.
+# At most 14 lines in total.
+function Get-DiffLines($Change) {
+    $all = New-Object System.Collections.ArrayList
+    if ($Change -and $Change.kind -eq 'write') {
+        foreach ($l in @(Split-TextLines ([string]$Change.content))) { [void]$all.Add([pscustomobject]@{ kind = 'add'; text = $l }) }
+    }
+    elseif ($Change) {
+        foreach ($edit in @($Change.edits)) {
+            $old = @(Split-TextLines ([string]$edit.old))
+            $new = @(Split-TextLines ([string]$edit.new))
+            $head = 0
+            while ($head -lt $old.Count -and $head -lt $new.Count -and $old[$head] -ceq $new[$head]) { $head++ }
+            $tail = 0
+            while ($tail -lt $old.Count - $head -and $tail -lt $new.Count - $head -and $old[$old.Count - 1 - $tail] -ceq $new[$new.Count - 1 - $tail]) { $tail++ }
+            for ($i = $head; $i -lt $old.Count - $tail; $i++) { [void]$all.Add([pscustomobject]@{ kind = 'del'; text = $old[$i] }) }
+            for ($i = $head; $i -lt $new.Count - $tail; $i++) { [void]$all.Add([pscustomobject]@{ kind = 'add'; text = $new[$i] }) }
+        }
+    }
+    $shown = @($all | Select-Object -First 14)
+    $shown
+    if ($all.Count -gt 14) { [pscustomobject]@{ kind = 'more'; text = [string]($all.Count - 14) } }
+}
+
+# "Ctrl+Alt+Y" -> @{ mod; vk } for RegisterHotKey (mod includes MOD_NOREPEAT, 0x4000); $null when the
+# text is not a valid hotkey: modifiers Ctrl, Alt, Shift, Win (at least one) and one key A-Z, 0-9 or F1-F24
+function ConvertTo-Hotkey([string]$Text) {
+    if (-not $Text) { return $null }
+    $mod = 0x4000
+    $vk = 0
+    foreach ($part in ($Text -split '\+')) {
+        $p = $part.Trim().ToUpperInvariant()
+        if ($p -eq 'CTRL') { $mod = $mod -bor 2 }
+        elseif ($p -eq 'ALT') { $mod = $mod -bor 1 }
+        elseif ($p -eq 'SHIFT') { $mod = $mod -bor 4 }
+        elseif ($p -eq 'WIN') { $mod = $mod -bor 8 }
+        elseif ($vk -ne 0) { return $null }
+        elseif ($p -match '^[A-Z0-9]$') { $vk = [int][char]$p }
+        elseif ($p -match '^F([1-9]|1[0-9]|2[0-4])$') { $vk = 0x6F + [int]$Matches[1] }
+        else { return $null }
+    }
+    if ($vk -eq 0 -or ($mod -band 0xF) -eq 0) { return $null }
+    return @{ mod = $mod; vk = $vk }
+}
