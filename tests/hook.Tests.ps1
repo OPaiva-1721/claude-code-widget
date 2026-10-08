@@ -210,6 +210,10 @@ Describe 'busy sessions and all done' {
         Set-SessionBusy 'c'
         Complete-SessionBusy 'c' | Should -BeFalse
     }
+    It 'records the project of the session in the busy file' {
+        Set-SessionBusy 'a' '' 'C:\dev\app'
+        ([IO.File]::ReadAllText((Join-Path $Busy 'a.json')) | ConvertFrom-Json).cwd | Should -BeExactly 'C:\dev\app'
+    }
 }
 
 Describe 'busy sessions whose turn was interrupted' {

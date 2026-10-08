@@ -122,6 +122,15 @@ Describe 'repository rules' {
         $reload | Should -BeLessThan $install
     }
 
+    # PowerShell variable names ignore letter case, and scope is dynamic: an event handler with
+    # param($s, ...) hides the strings table $S for everything it calls (the tray tooltip went blank)
+    It 'widget.ps1 has no handler parameter named like the strings table ($S)' {
+        $text = [IO.File]::ReadAllText((Join-Path $repo 'plugins\opaiva-code-widget\scripts\widget.ps1'))
+        [regex]::Matches($text, '(?i)param\(([^)]*)\)') | ForEach-Object {
+            $_.Groups[1].Value -split ',' | ForEach-Object { $_.Trim() } | Should -Not -BeIn @('$s')
+        }
+    }
+
     # Claude Code follows "renames" when an installed plugin is missing from the marketplace and moves
     # the user's settings to the new name: the 1.1.1 name must keep pointing at the current plugin
     It 'marketplace maps the 1.1.1 plugin name to the current one' {

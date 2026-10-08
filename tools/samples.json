@@ -18,7 +18,7 @@
           "options": [
             { "label": "PostgreSQL", "description": "Relational, already used by the other services" },
             { "label": "SQLite", "description": "A single file, simplest to run locally" }
-          ]
+    ]
         },
         {
           "question": "Which checks should run before deploy?",
@@ -28,16 +28,21 @@
             { "label": "Unit tests", "description": "" },
             { "label": "Lint", "description": "" },
             { "label": "Type check", "description": "" }
-          ]
+    ]
         }
-      ],
+    ],
       "selected": [["PostgreSQL"], ["Unit tests", "Lint"]]
     },
     "done": {
       "title": "Login form validation",
       "cwd": "C:\\dev\\my-app",
       "message": "Done: the login page now validates the e-mail format before submitting. I added 6 unit tests and all of them pass."
-    }
+    },
+    "sessions": [
+      { "cwd": "C:\\dev\\my-app", "title": "Login form validation", "waiting": true, "minutes": 2 },
+      { "cwd": "C:\\dev\\billing", "title": "New billing service", "waiting": false, "minutes": 7 },
+      { "cwd": "C:\\dev\\docs", "title": "", "waiting": false, "minutes": 14 }
+    ]
   },
   "pt": {
     "permission": {
@@ -58,7 +63,7 @@
           "options": [
             { "label": "PostgreSQL", "description": "Relacional, já usado pelos outros serviços" },
             { "label": "SQLite", "description": "Um arquivo só, mais simples de rodar local" }
-          ]
+    ]
         },
         {
           "question": "Quais verificações rodar antes do deploy?",
@@ -68,15 +73,20 @@
             { "label": "Testes unitários", "description": "" },
             { "label": "Lint", "description": "" },
             { "label": "Checagem de tipos", "description": "" }
-          ]
+    ]
         }
-      ],
+    ],
       "selected": [["PostgreSQL"], ["Testes unitários", "Lint"]]
     },
     "done": {
       "title": "Validação do login",
       "cwd": "C:\\dev\\meu-app",
       "message": "Pronto: a tela de login agora valida o formato do e-mail antes de enviar. Adicionei 6 testes unitários e todos passam."
-    }
+    },
+    "sessions": [
+      { "cwd": "C:\\dev\\meu-app", "title": "Validação do login", "waiting": true, "minutes": 2 },
+      { "cwd": "C:\\dev\\cobranca", "title": "Serviço de cobrança", "waiting": false, "minutes": 7 },
+      { "cwd": "C:\\dev\\docs", "title": "", "waiting": false, "minutes": 14 }
+    ]
   }
 }

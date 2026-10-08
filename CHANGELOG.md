@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.0 (2026-10-08)
+
+- **Tray icon and "do not disturb".** A tray icon (orange while active, grey in "do not disturb") toggles the mode with a left click; its menu has **Do not disturb** and **Close widget**. In the mode, permission requests and questions go straight to VS Code, the widget hides, and "finished" notices wait silently until you turn the mode off. The mode stays on until you turn it off, even after a restart. If the icon is in the hidden-icons area, drag it onto the taskbar once.
+- **Sessions list.** The idle pill says how many sessions are working. Click it to see each one: project, session title and how long it has been working (orange when a request from that project is waiting).
+- Long session titles are cut without splitting an emoji.
+
 ## 2.1.0 (2026-10-08)
 
 - **Session title on the cards.** Next to the project, the cards show the session's title: the name you gave it with `/rename`, or the one Claude Code picked. Two sessions in the same project are easy to tell apart.

@@ -43,7 +43,7 @@ Describe 'widget.ps1 rendering' -Tag 'Desktop' {
         $out = Join-Path $TestDrive $lang
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $widget -RenderSamples $samples -OutDir $out -Lang $lang
         $LASTEXITCODE | Should -Be 0
-        foreach ($name in 'idle', 'permission', 'question', 'done') {
+        foreach ($name in 'idle', 'sessions', 'permission', 'question', 'done') {
             $png = Join-Path $out "$name.png"
             $png | Should -Exist
             (Get-Item -LiteralPath $png).Length | Should -BeGreaterThan 1024
@@ -105,6 +105,37 @@ Describe 'widget.ps1 position' -Tag 'Desktop' {
             }
             $inCorner | Should -BeTrue
             [IO.File]::ReadAllText($statePath) | Should -BeExactly $state
+            Join-Path $data 'widget.log' | Should -Not -Exist
+        }
+        finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            [void]$proc.WaitForExit(5000)
+            Remove-Item -LiteralPath $data -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe 'widget.ps1 do not disturb' -Tag 'Desktop' {
+    It 'hides its window while dnd.flag exists and shows it again when removed' {
+        $data = Join-Path ([IO.Path]::GetTempPath()) ('ccw-widget-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $data 'queue') | Out-Null
+        Set-Dnd $data $true
+        function Get-VisibleCount($ProcessId) { @([CcwTest.Windows]::Rects($ProcessId)).Count }
+        function Wait-Until([scriptblock]$Condition, [int]$Seconds = 15) {
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            while ((Get-Date) -lt $deadline) { if (& $Condition) { return $true }; Start-Sleep -Milliseconds 250 }
+            return $false
+        }
+        $proc = Start-Process powershell.exe -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+            '-File', ('"{0}"' -f $widget), '-DataDir', ('"{0}"' -f $data), '-Lang', 'en'
+        try {
+            (Wait-Until { Test-Path -LiteralPath (Join-Path $data 'widget.json') }) | Should -BeTrue
+            Start-Sleep -Seconds 3
+            Get-VisibleCount $proc.Id | Should -Be 0
+            Set-Dnd $data $false
+            (Wait-Until { (Get-VisibleCount $proc.Id) -gt 0 }) | Should -BeTrue
+            Set-Dnd $data $true
+            (Wait-Until { (Get-VisibleCount $proc.Id) -eq 0 }) | Should -BeTrue
             Join-Path $data 'widget.log' | Should -Not -Exist
         }
         finally {

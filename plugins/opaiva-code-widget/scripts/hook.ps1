@@ -203,29 +203,13 @@ function Get-ClaudePid {
     } catch { return 0 }
 }
 
-# Ids of the sessions still working: their Claude process runs (or is unknown), they started less
-# than 12 hours ago and their transcript (when known) was written in the last 15 minutes. Files of the
-# other sessions are removed.
+# Ids of the sessions still working (see Get-BusySessions)
 function Get-WorkingSessions {
-    $now = Get-NowMs
-    foreach ($f in @(Get-ChildItem -LiteralPath $Busy -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
-        $alive = $false
-        try {
-            $b = [IO.File]::ReadAllText($f.FullName, $Utf8) | ConvertFrom-Json
-            $alive = (($now - [int64]$b.since) -lt $BusyMaxAgeMs) -and
-                ([int]$b.pid -eq 0 -or $null -ne (Get-Process -Id ([int]$b.pid) -ErrorAction SilentlyContinue))
-            $transcript = [string]$b.transcript
-            if ($alive -and $transcript -and (Test-Path -LiteralPath $transcript)) {
-                $quietMs = ([DateTime]::UtcNow - (Get-Item -LiteralPath $transcript).LastWriteTimeUtc).TotalMilliseconds
-                if ($quietMs -gt $BusyQuietMs) { $alive = $false }
-            }
-        } catch {}
-        if ($alive) { $f.BaseName } else { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue }
-    }
+    foreach ($b in @(Get-BusySessions $Busy $BusyMaxAgeMs $BusyQuietMs)) { $b.id }
 }
 
 # UserPromptSubmit: this session is working. With nothing else working, a new round starts.
-function Set-SessionBusy([string]$Sid, [string]$Transcript = '') {
+function Set-SessionBusy([string]$Sid, [string]$Transcript = '', [string]$Cwd = '') {
     if (-not $Sid) { return }
     try {
         $others = @(Get-WorkingSessions | Where-Object { $_ -ne $Sid })
@@ -237,7 +221,7 @@ function Set-SessionBusy([string]$Sid, [string]$Transcript = '') {
         New-Item -ItemType Directory -Force -Path $Busy | Out-Null
         $file = Join-Path $Busy "$Sid.json"
         Remove-Item -LiteralPath $file, $RoundPath -Force -ErrorAction SilentlyContinue
-        Write-JsonAtomic $file ([ordered]@{ pid = Get-ClaudePid; since = Get-NowMs; transcript = $Transcript })
+        Write-JsonAtomic $file ([ordered]@{ pid = Get-ClaudePid; since = Get-NowMs; transcript = $Transcript; cwd = $Cwd })
         Write-JsonAtomic $RoundPath @{ sessions = @($round) }
     } catch {}
 }
@@ -281,42 +265,6 @@ function Test-UserWatching([string]$cwd, $sessionWindow) {
         return ($title.IndexOf('Visual Studio Code', [StringComparison]::OrdinalIgnoreCase) -ge 0) -and
                (Test-TitleHasProject $title $project)
     } catch { return $false }
-}
-
-# The session's title as Claude Code shows it: the name given with /rename (custom-title), else the
-# automatic one (ai-title). Both are repeated in the transcript every few turns, so the last 512 KB
-# are enough. Empty when there is none or the transcript cannot be read.
-function Get-SessionTitle([string]$TranscriptPath, [string]$SessionId) {
-    if (-not $TranscriptPath) { return '' }
-    try {
-        $fs = [IO.File]::Open($TranscriptPath, 'Open', 'Read', 'ReadWrite')
-        try {
-            $start = [math]::Max([int64]0, $fs.Length - [int64]512KB)
-            [void]$fs.Seek($start, 'Begin')
-            $buf = New-Object byte[] ([int]($fs.Length - $start))
-            $n = 0
-            while ($n -lt $buf.Length) {
-                $read = $fs.Read($buf, $n, $buf.Length - $n)
-                if ($read -le 0) { break }
-                $n += $read
-            }
-        }
-        finally { $fs.Dispose() }
-        $lines = [Text.Encoding]::UTF8.GetString($buf, 0, $n) -split "`n"
-        # Reading from the middle of the file: the first line is cut
-        if ($start -gt 0) { $lines = @($lines | Select-Object -Skip 1) }
-        $custom = ''
-        $auto = ''
-        foreach ($line in $lines) {
-            if ($line.IndexOf('"custom-title"') -lt 0 -and $line.IndexOf('"ai-title"') -lt 0) { continue }
-            try { $o = $line | ConvertFrom-Json } catch { continue }
-            if ($o.sessionId -and $SessionId -and [string]$o.sessionId -ne $SessionId) { continue }
-            if ($o.type -eq 'custom-title' -and $o.customTitle) { $custom = [string]$o.customTitle }
-            elseif ($o.type -eq 'ai-title' -and $o.aiTitle) { $auto = [string]$o.aiTitle }
-        }
-        if ($custom) { return $custom.Trim() }
-        return $auto.Trim()
-    } catch { return '' }
 }
 
 # Text of Claude's last reply: the event field when present, otherwise the end of the transcript
@@ -364,6 +312,8 @@ function Wait-Response([string]$id) {
             if ($parentPid -and -not (Get-Process -Id $parentPid -ErrorAction SilentlyContinue)) { $script:waitEnd = 'session ended'; return $null }
             # You walked away with the card on screen: hand it to VS Code / your phone
             if (Test-Away) { $script:waitEnd = 'idle'; return $null }
+            # "Do not disturb" was turned on after this request was written: the widget is hidden
+            if (Test-Dnd $Data) { $script:waitEnd = 'do not disturb'; return $null }
         }
         Start-Sleep -Milliseconds 300
     }
@@ -440,7 +390,7 @@ function Invoke-Hook($evt) {
     if ($hookEvent -eq 'UserPromptSubmit') {
         Write-HookLog $logTag
         Remove-Done $sid
-        Set-SessionBusy $sid $transcript
+        Set-SessionBusy $sid $transcript $cwd
         Save-SessionWindow $sid $logTag
         return $null
     }
@@ -477,6 +427,7 @@ function Invoke-Hook($evt) {
         if ($tool -ne 'AskUserQuestion') { return $null }
         $questions = @($in.questions)
         if ($questions.Count -eq 0) { return $null }
+        if (Test-Dnd $Data) { Write-HookLog "$logTag do not disturb: question goes to VS Code"; return $null }
         if (Test-Away) { Write-HookLog "$logTag idle: question goes to VS Code"; return $null }
         if (-not (Start-Widget)) { Write-HookLog "$logTag widget did not start"; return $null }
         Remove-Done $sid
@@ -502,6 +453,7 @@ function Invoke-Hook($evt) {
     if ($hookEvent -eq 'PermissionRequest') {
         # These already need the screen (questions, plan approval) -> normal flow
         if ($tool -in @('AskUserQuestion', 'ExitPlanMode')) { return $null }
+        if (Test-Dnd $Data) { Write-HookLog "$logTag $tool do not disturb: goes to VS Code"; return $null }
         if (Test-Away) { Write-HookLog "$logTag $tool idle: goes to VS Code"; return $null }
 
         $detail = Get-PermissionDetail $in
