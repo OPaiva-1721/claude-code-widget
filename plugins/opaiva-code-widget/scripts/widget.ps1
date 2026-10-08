@@ -118,6 +118,10 @@ namespace ClaudeWidget {
             return found.ToArray();
         }
     }
+    public static class HotKeys {
+        [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr h, int id, uint mod, uint vk);
+        [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h, int id);
+    }
 }
 '@
         $script:canFocus = $true
@@ -1092,6 +1096,52 @@ namespace ClaudeWidget {
             $once.Add_Tick({ param($sender, $e) $sender.Stop(); try { Sync-Dnd } catch { Write-Log $_ } })
             $once.Start()
         })
+
+        # --- Global hotkeys (opt-in: CLAUDE_WIDGET_HOTKEYS=1) ---
+        # Approve / deny act only on a permission card on screen; the third toggles "do not disturb"
+        function Send-HotkeyDecision([string]$decision) {
+            if ($script:current -and $script:current.kind -eq 'permission' -and -not $script:dnd) { Send-Response $decision }
+        }
+        $script:hotkeyActions = @{}
+        $script:hotkeyIds = @()
+        if ($env:CLAUDE_WIDGET_HOTKEYS -eq '1') {
+            $hotkeyDefs = @(
+                @{ id = 1; name = 'CLAUDE_WIDGET_KEY_APPROVE'; text = 'Ctrl+Alt+Y'; action = { Send-HotkeyDecision 'allow' } }
+                @{ id = 2; name = 'CLAUDE_WIDGET_KEY_DENY'; text = 'Ctrl+Alt+N'; action = { Send-HotkeyDecision 'deny' } }
+                @{ id = 3; name = 'CLAUDE_WIDGET_KEY_DND'; text = 'Ctrl+Alt+D'; action = { Set-Dnd $Data (-not (Test-Dnd $Data)); Sync-Dnd } }
+            )
+            $win.Add_SourceInitialized({
+                try {
+                    $h = $script:hwnd
+                    $source = [System.Windows.Interop.HwndSource]::FromHwnd($h)
+                    $script:hotkeyHook = [System.Windows.Interop.HwndSourceHook]{
+                        param($hwnd, $msg, $wParam, $lParam, [ref]$handled)
+                        if ($msg -eq 0x0312) {
+                            $action = $script:hotkeyActions[[int]$wParam]
+                            if ($action) {
+                                $handled.Value = $true
+                                try { & $action } catch { Write-Log $_ }
+                            }
+                        }
+                        return [IntPtr]::Zero
+                    }
+                    $source.AddHook($script:hotkeyHook)
+                    foreach ($d in $hotkeyDefs) {
+                        $text = [Environment]::GetEnvironmentVariable($d.name)
+                        if (-not $text) { $text = $d.text }
+                        $hk = ConvertTo-Hotkey $text
+                        if (-not $hk) { Write-Log "hotkey $($d.name): '$text' is not a valid hotkey"; continue }
+                        if ([ClaudeWidget.HotKeys]::RegisterHotKey($h, $d.id, [uint32]$hk.mod, [uint32]$hk.vk)) {
+                            $script:hotkeyActions[$d.id] = $d.action
+                            $script:hotkeyIds += $d.id
+                            if ($d.id -eq 1) { $ui.BtnApprove.Content = $S.approve + " ($text)" }
+                            if ($d.id -eq 2) { $ui.BtnDeny.Content = $S.deny + " ($text)" }
+                        }
+                        else { Write-Log "hotkey $text could not be registered (another program uses it?)" }
+                    }
+                } catch { Write-Log $_ }
+            })
+        }
     }
 
     # Pulsing dot while a request or question is waiting
@@ -1204,6 +1254,7 @@ namespace ClaudeWidget {
     })
     $win.Add_Closed({
         $timer.Stop()
+        foreach ($id in @($script:hotkeyIds)) { [void][ClaudeWidget.HotKeys]::UnregisterHotKey($script:hwnd, $id) }
         if ($tray) { $tray.Visible = $false; $tray.Dispose() }
     })
     $timer.Start()
