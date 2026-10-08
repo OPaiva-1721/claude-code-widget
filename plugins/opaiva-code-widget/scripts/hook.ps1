@@ -361,9 +361,59 @@ function Get-PermissionDetail($ToolInput) {
 }
 
 # PermissionRequest answer in Claude Code's hook format; deny carries a message for Claude
-function New-PermissionOutput([string]$Behavior, [string]$Message) {
+# The file change of an Edit, MultiEdit or Write for the widget's diff (texts cut at 4000 characters,
+# at most 5 edits); $null for other tools or when there is nothing to show
+function New-ChangeInfo([string]$Tool, $ToolInput) {
+    if (-not $ToolInput) { return $null }
+    function Limit-Text($t) { $t = [string]$t; if ($t.Length -gt 4000) { return $t.Substring(0, 4000) } return $t }
+    if ($Tool -eq 'Write') {
+        return @{ kind = 'write'; content = (Limit-Text $ToolInput.content) }
+    }
+    $edits = @()
+    if ($Tool -eq 'Edit') { $edits = @($ToolInput) }
+    elseif ($Tool -eq 'MultiEdit') { $edits = @($ToolInput.edits) }
+    else { return $null }
+    $list = @($edits | Where-Object { $_ } | Select-Object -First 5 | ForEach-Object { @{ old = (Limit-Text $_.old_string); new = (Limit-Text $_.new_string) } })
+    if ($list.Count -eq 0) { return $null }
+    return @{ kind = 'edit'; edits = $list }
+}
+
+# The suggestions of Claude Code the widget may offer as "Always allow", with their original index:
+# rules that allow, the modes below bypassPermissions, and directories. Never rules that remove or
+# replace the user's rules, nor anything that denies.
+function Get-OfferedSuggestions($Suggestions) {
+    $i = -1
+    foreach ($s in @($Suggestions)) {
+        $i++
+        if (-not $s) { continue }
+        $ok = $false
+        switch ([string]$s.type) {
+            'addRules' { $ok = ([string]$s.behavior -ne 'deny') -and (@($s.rules).Count -gt 0) }
+            'setMode' { $ok = ([string]$s.behavior -ne 'deny') -and ([string]$s.mode -in @('default', 'plan', 'acceptEdits', 'auto', 'dontAsk')) }
+            'addDirectories' { $ok = @($s.directories).Count -gt 0 }
+        }
+        if ($ok) {
+            [pscustomobject]@{ index = $i; type = [string]$s.type; rules = @($s.rules); destination = [string]$s.destination
+                mode = [string]$s.mode; directories = @($s.directories) }
+        }
+    }
+}
+
+# The suggestion as Claude Code sent it (type, rules, behavior, destination, mode, directories), without
+# the empty fields, in the form updatedPermissions takes
+function ConvertTo-UpdatedPermission($Suggestion) {
+    $o = [ordered]@{}
+    foreach ($name in 'type', 'rules', 'behavior', 'destination', 'mode', 'directories') {
+        $p = $Suggestion.PSObject.Properties[$name]
+        if ($p -and $null -ne $p.Value -and -not ($p.Value -is [array] -and $p.Value.Count -eq 0) -and [string]$p.Value -ne '') { $o[$name] = $p.Value }
+    }
+    return $o
+}
+
+function New-PermissionOutput([string]$Behavior, [string]$Message, $UpdatedPermissions = $null) {
     $decision = [ordered]@{ behavior = $Behavior }
     if ($Behavior -eq 'deny') { $decision.message = $Message }
+    if ($Behavior -eq 'allow' -and $null -ne $UpdatedPermissions -and @($UpdatedPermissions).Count -gt 0) { $decision.updatedPermissions = @($UpdatedPermissions) }
     return [ordered]@{ hookSpecificOutput = [ordered]@{ hookEventName = 'PermissionRequest'; decision = $decision } }
 }
 
@@ -472,16 +522,28 @@ function Invoke-Hook($evt) {
         # The session is working again: its previous "finished" notice is stale
         Remove-Done $sid
 
+        $offered = @(Get-OfferedSuggestions $evt.permission_suggestions)
         $id = New-Request 'permission' $cwd @{
             tool        = $tool
             description = $desc
             detail      = $detail
             title       = Get-SessionTitle $transcript $sid
+            change      = New-ChangeInfo $tool $in
+            suggestions = $offered
         }
         try { $res = Wait-Response $id } finally { Remove-Request $id }
 
         $decision = if ($res) { [string]$res.decision } else { $null }
         Write-HookLog ("$logTag $tool -> " + $(if ($decision) { $decision } else { $script:waitEnd }))
+        if ($decision -eq 'allowAlways') {
+            # Only the index counts: the content comes from Claude Code's own suggestions of this request
+            $index = -1
+            if ([int]::TryParse([string]$res.index, [ref]$index) -and (@($offered | Where-Object { $_.index -eq $index }).Count -gt 0)) {
+                $chosen = @($evt.permission_suggestions)[$index]
+                return ConvertTo-AsciiJson (New-PermissionOutput 'allow' '' @(ConvertTo-UpdatedPermission $chosen))
+            }
+            return ConvertTo-AsciiJson (New-PermissionOutput 'allow' '')
+        }
         if ($decision -in @('allow', 'deny')) { return ConvertTo-AsciiJson (New-PermissionOutput $decision $S.deniedMessage) }
         return $null
     }

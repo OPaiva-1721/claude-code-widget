@@ -246,3 +246,84 @@ Describe 'busy sessions whose turn was interrupted' {
         ([IO.File]::ReadAllText((Join-Path $Busy 'a.json')) | ConvertFrom-Json).transcript | Should -BeExactly 'C:\x\t.jsonl'
     }
 }
+
+Describe 'New-ChangeInfo' {
+    It 'describes an Edit' {
+        $c = New-ChangeInfo 'Edit' ([pscustomobject]@{ file_path = 'C:\a.ps1'; old_string = 'x'; new_string = 'y' })
+        $c.kind | Should -BeExactly 'edit'
+        @($c.edits).Count | Should -Be 1
+        $c.edits[0].old | Should -BeExactly 'x'
+        $c.edits[0].new | Should -BeExactly 'y'
+    }
+    It 'describes a Write' {
+        $c = New-ChangeInfo 'Write' ([pscustomobject]@{ file_path = 'C:\a.ps1'; content = 'hello' })
+        $c.kind | Should -BeExactly 'write'
+        $c.content | Should -BeExactly 'hello'
+    }
+    It 'describes a MultiEdit, at most 5 edits' {
+        $edits = 1..8 | ForEach-Object { [pscustomobject]@{ old_string = "o$_"; new_string = "n$_" } }
+        $c = New-ChangeInfo 'MultiEdit' ([pscustomobject]@{ file_path = 'C:\a.ps1'; edits = $edits })
+        $c.kind | Should -BeExactly 'edit'
+        @($c.edits).Count | Should -Be 5
+        $c.edits[4].new | Should -BeExactly 'n5'
+    }
+    It 'cuts long texts at 4000 characters' {
+        $c = New-ChangeInfo 'Write' ([pscustomobject]@{ content = 'x' * 9000 })
+        $c.content.Length | Should -Be 4000
+    }
+    It 'is null for other tools and for empty input' {
+        New-ChangeInfo 'Bash' ([pscustomobject]@{ command = 'ls' }) | Should -BeNullOrEmpty
+        New-ChangeInfo 'MultiEdit' ([pscustomobject]@{ edits = @() }) | Should -BeNullOrEmpty
+        New-ChangeInfo 'Edit' $null | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-OfferedSuggestions' {
+    It 'keeps allow rules, safe modes and directories, with their original index' {
+        $list = '[
+          {"type":"addRules","rules":["Bash(npm test *)"],"behavior":"allow","destination":"session","mode":null},
+          {"type":"setMode","behavior":"allow","destination":"session","mode":"acceptEdits"},
+          {"type":"addDirectories","directories":["C:\\other"],"destination":"session"}]' | ConvertFrom-Json
+        $out = @(Get-OfferedSuggestions $list)
+        $out.Count | Should -Be 3
+        ($out | ForEach-Object { $_.index }) -join ',' | Should -BeExactly '0,1,2'
+        $out[0].rules[0] | Should -BeExactly 'Bash(npm test *)'
+        $out[1].mode | Should -BeExactly 'acceptEdits'
+        $out[2].directories[0] | Should -BeExactly 'C:\other'
+    }
+    It 'drops removeRules, replaceRules, deny and bypassPermissions' {
+        $list = '[
+          {"type":"removeRules","rules":["Bash(*)"],"behavior":"allow","destination":"userSettings"},
+          {"type":"replaceRules","rules":["Bash(*)"],"behavior":"allow","destination":"userSettings"},
+          {"type":"addRules","rules":["Bash(rm *)"],"behavior":"deny","destination":"session"},
+          {"type":"setMode","behavior":"allow","destination":"session","mode":"bypassPermissions"},
+          {"type":"addRules","rules":["Read(*)"],"behavior":"allow","destination":"session"}]' | ConvertFrom-Json
+        $out = @(Get-OfferedSuggestions $list)
+        $out.Count | Should -Be 1
+        $out[0].index | Should -Be 4
+    }
+    It 'drops rules without rules and directories without directories' {
+        $list = '[{"type":"addRules","rules":[],"behavior":"allow"},{"type":"addDirectories","directories":[]}]' | ConvertFrom-Json
+        @(Get-OfferedSuggestions $list).Count | Should -Be 0
+    }
+    It 'returns nothing without suggestions' {
+        @(Get-OfferedSuggestions $null).Count | Should -Be 0
+    }
+}
+
+Describe 'ConvertTo-UpdatedPermission and New-PermissionOutput' {
+    It 'keeps the suggestion as it came, without a null mode' {
+        $s = '{"type":"addRules","rules":["Bash(git *)"],"behavior":"allow","destination":"projectSettings","mode":null}' | ConvertFrom-Json
+        ConvertTo-UpdatedPermission $s | ConvertTo-Json -Compress |
+            Should -BeExactly '{"type":"addRules","rules":["Bash(git *)"],"behavior":"allow","destination":"projectSettings"}'
+    }
+    It 'keeps the mode of a setMode suggestion' {
+        $s = '{"type":"setMode","behavior":"allow","destination":"session","mode":"acceptEdits"}' | ConvertFrom-Json
+        (ConvertTo-UpdatedPermission $s).mode | Should -BeExactly 'acceptEdits'
+    }
+    It 'adds updatedPermissions to the allow decision' {
+        $s = '{"type":"addRules","rules":["Bash(git *)"],"behavior":"allow","destination":"session"}' | ConvertFrom-Json
+        $out = New-PermissionOutput 'allow' '' @(ConvertTo-UpdatedPermission $s)
+        ConvertTo-AsciiJson $out | Should -BeExactly '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"addRules","rules":["Bash(git *)"],"behavior":"allow","destination":"session"}]}}}'
+    }
+}
