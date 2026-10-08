@@ -90,7 +90,7 @@ O widget volta a abrir no canto padrão, porque o nome novo vem com uma pasta de
 
 - **Arraste** o widget para onde quiser. Ele lembra a posição.
 - **Duplo clique** no widget (fora dos botões) traz a janela da sessão: no aviso de "terminou", a daquela sessão; nos outros casos, a da última sessão em que você digitou.
-- **Botão direito → Fechar widget** fecha o widget. Os pedidos pendentes voltam para o VS Code. Ele abre de novo na próxima sessão ou no próximo pedido.
+- **Botão direito** abre o menu: **Tema**, **Opacidade**, **Volume**, **Tamanho**, **Pílula mínima** (veja [Aparência e som](#aparência-e-som)) e **Fechar widget**. Fechar devolve os pedidos pendentes ao VS Code, e o widget abre de novo na próxima sessão ou no próximo pedido.
 - **Ícone na bandeja.** O clique esquerdo liga e desliga o **não perturbe**; o botão direito abre o menu. No modo, pedidos e perguntas vão direto para o VS Code, o widget fica escondido e os avisos de "terminou" esperam até você desligar. Fica ligado até você desligar, inclusive depois de reiniciar. O Windows pode esconder ícones novos na bandeja: arraste-o para a barra uma vez.
 - Com vários pedidos ou sessões, aparece quantos estão esperando (`+1 na fila`), e eles vêm um de cada vez.
 - O chip do projeto também mostra o título da sessão (o nome dado com `/rename`, ou o automático do Claude Code). Quando várias sessões estavam trabalhando e a última termina, o aviso toca um som diferente.
@@ -125,6 +125,22 @@ Defina estas variáveis de ambiente no bloco `env` do `~/.claude/settings.json`:
   }
 }
 ```
+
+## Aparência e som
+
+Clique com o botão direito no widget para mudar como ele parece e soa. Cada escolha vale na hora e fica salva em `prefs.json`, na pasta de dados do plugin.
+
+| Menu | Opções |
+| --- | --- |
+| Tema | Escuro (padrão), Claro ou Automático (segue o tema de aplicativos do Windows quando o widget abre) |
+| Opacidade | 100, 90, 80, 70 ou 60% |
+| Volume | Mudo, 25, 50, 75 ou 100% (padrão) |
+| Tamanho | 100% (padrão), 125% ou 150% |
+| Pílula mínima | Parado, mostra só o ponto colorido. O texto de estado vira dica (tooltip) e o clique ainda abre a lista de sessões. |
+
+<img src="docs/images/pt/light-permission.png" width="420" alt="Cartão de pedido de permissão no tema claro">
+
+O volume vale para os três sons do widget (pedido, terminou, tudo pronto). Se o Windows não conseguir tocar um arquivo de som, o widget usa o som do sistema, que ignora o volume (o Mudo continua silenciando).
 
 ## Como funciona
 

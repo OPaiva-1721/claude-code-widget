@@ -90,7 +90,7 @@ The widget starts in the default corner again, because the new name comes with a
 
 - **Drag** the widget anywhere. It remembers the position.
 - **Double-click** the widget (outside its buttons) to bring back the session's window: on a "finished" notice, that session; otherwise, the session you typed in last.
-- **Right-click → Close widget** closes it. Pending requests go back to VS Code. It opens again with the next session or request.
+- **Right-click** opens the menu: **Theme**, **Opacity**, **Volume**, **Size**, **Minimal pill** (see [Look and sound](#look-and-sound)) and **Close widget**. Close hands pending requests back to VS Code, and the widget opens again with the next session or request.
 - **Tray icon.** Left-click toggles **do not disturb**; right-click for the menu. In the mode, requests and questions go straight to VS Code, the widget is hidden and "finished" notices wait until you turn it off. It stays on until you turn it off, even after a restart. Windows may hide new tray icons: drag it onto the taskbar once.
 - With several requests or sessions, a chip shows how many are waiting (`+1 queued`), and they come one at a time.
 - The project chip also shows the session's title (the name from `/rename`, or Claude Code's automatic one). When several sessions were working and the last one finishes, its notice plays a different sound.
@@ -125,6 +125,22 @@ Set these environment variables in the `env` block of `~/.claude/settings.json`:
   }
 }
 ```
+
+## Look and sound
+
+Right-click the widget to change how it looks and sounds. Each choice applies right away and is saved in `prefs.json` in the plugin data folder.
+
+| Menu | Choices |
+| --- | --- |
+| Theme | Dark (default), Light, or Automatic (follows the Windows app theme when the widget opens) |
+| Opacity | 100, 90, 80, 70 or 60% |
+| Volume | Mute, 25, 50, 75 or 100% (default) |
+| Size | 100% (default), 125% or 150% |
+| Minimal pill | When idle, shows only the colored dot. The status text becomes the tooltip, and a click still opens the sessions list. |
+
+<img src="docs/images/en/light-permission.png" width="420" alt="Permission request card in the light theme">
+
+The volume applies to the widget's three sounds (request, finished, all done). If Windows cannot play a sound file, the widget falls back to the system sound, which ignores the volume setting (Mute still silences it).
 
 ## How it works
 

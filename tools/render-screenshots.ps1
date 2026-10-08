@@ -11,3 +11,12 @@ foreach ($lang in 'en', 'pt') {
     if ($LASTEXITCODE) { throw "render failed for '$lang'" }
     Get-ChildItem $out -Filter *.png | ForEach-Object { '{0}\{1}' -f $lang, $_.Name }
 }
+
+foreach ($lang in 'en', 'pt') {
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('ccw-light-' + [guid]::NewGuid().ToString('N'))
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $widget -RenderSamples $samples -OutDir $tmp -Lang $lang -Theme light
+    if ($LASTEXITCODE) { throw "light render failed for '$lang'" }
+    Copy-Item -LiteralPath (Join-Path $tmp 'permission.png') -Destination (Join-Path $repo "docs\images\$lang\light-permission.png") -Force
+    Remove-Item -LiteralPath $tmp -Recurse -Force
+    '{0}\light-permission.png' -f $lang
+}

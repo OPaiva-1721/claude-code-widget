@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.0 (2026-10-08)
+
+- **Look and sound from the right-click menu.** Theme (dark, light, or automatic like Windows), opacity (100-60%), volume (mute to 100%), size (100/125/150%) and a minimal idle pill (only the colored dot; the status becomes a tooltip). Each choice applies at once and is saved in `prefs.json`.
+- The volume applies to the request, finished and all-done sounds. If Windows cannot play a sound file, the widget uses the system sound, which ignores the volume (Mute still silences it).
+
 ## 2.3.0 (2026-10-08)
 
 - **Diff on the card.** The permission card of an `Edit`, `MultiEdit` or `Write` shows what changes: removed lines in red, added lines in green (up to 14 lines).

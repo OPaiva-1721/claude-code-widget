@@ -1,7 +1,7 @@
 {
   "name": "opaiva-code-widget",
   "displayName": "Claude Code Widget",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Always-on-top Windows widget for Claude Code: approve permission requests, answer Claude's questions and get 'finished' notices without switching back to VS Code.",
   "author": {
     "name": "Gabryel Paiva Neves"
