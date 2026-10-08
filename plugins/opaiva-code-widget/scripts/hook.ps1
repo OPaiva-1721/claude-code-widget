@@ -32,6 +32,8 @@ $Sessions = Join-Path $Data 'sessions'
 $Busy = Join-Path $Data 'busy'
 $RoundPath = Join-Path $Data 'busy-round.json'
 $BusyMaxAgeMs = 12 * 3600 * 1000
+# Esc ends a turn without a Stop: a session whose transcript has not grown for this long is not working
+$BusyQuietMs = 15 * 60 * 1000
 $LogPath = Join-Path $Data 'hook.log'
 # Processes that own a terminal window (classic console, Windows Terminal and common alternatives)
 $TerminalHosts = @('windowsterminal.exe', 'openconsole.exe', 'conhost.exe', 'powershell.exe', 'pwsh.exe', 'cmd.exe',
@@ -201,8 +203,9 @@ function Get-ClaudePid {
     } catch { return 0 }
 }
 
-# Ids of the sessions still working: their Claude process runs (or is unknown) and they started less
-# than 12 hours ago. Files of the other sessions are removed.
+# Ids of the sessions still working: their Claude process runs (or is unknown), they started less
+# than 12 hours ago and their transcript (when known) was written in the last 15 minutes. Files of the
+# other sessions are removed.
 function Get-WorkingSessions {
     $now = Get-NowMs
     foreach ($f in @(Get-ChildItem -LiteralPath $Busy -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
@@ -211,13 +214,18 @@ function Get-WorkingSessions {
             $b = [IO.File]::ReadAllText($f.FullName, $Utf8) | ConvertFrom-Json
             $alive = (($now - [int64]$b.since) -lt $BusyMaxAgeMs) -and
                 ([int]$b.pid -eq 0 -or $null -ne (Get-Process -Id ([int]$b.pid) -ErrorAction SilentlyContinue))
+            $transcript = [string]$b.transcript
+            if ($alive -and $transcript -and (Test-Path -LiteralPath $transcript)) {
+                $quietMs = ([DateTime]::UtcNow - (Get-Item -LiteralPath $transcript).LastWriteTimeUtc).TotalMilliseconds
+                if ($quietMs -gt $BusyQuietMs) { $alive = $false }
+            }
         } catch {}
         if ($alive) { $f.BaseName } else { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue }
     }
 }
 
 # UserPromptSubmit: this session is working. With nothing else working, a new round starts.
-function Set-SessionBusy([string]$Sid) {
+function Set-SessionBusy([string]$Sid, [string]$Transcript = '') {
     if (-not $Sid) { return }
     try {
         $others = @(Get-WorkingSessions | Where-Object { $_ -ne $Sid })
@@ -229,7 +237,7 @@ function Set-SessionBusy([string]$Sid) {
         New-Item -ItemType Directory -Force -Path $Busy | Out-Null
         $file = Join-Path $Busy "$Sid.json"
         Remove-Item -LiteralPath $file, $RoundPath -Force -ErrorAction SilentlyContinue
-        Write-JsonAtomic $file ([ordered]@{ pid = Get-ClaudePid; since = Get-NowMs })
+        Write-JsonAtomic $file ([ordered]@{ pid = Get-ClaudePid; since = Get-NowMs; transcript = $Transcript })
         Write-JsonAtomic $RoundPath @{ sessions = @($round) }
     } catch {}
 }
@@ -432,7 +440,7 @@ function Invoke-Hook($evt) {
     if ($hookEvent -eq 'UserPromptSubmit') {
         Write-HookLog $logTag
         Remove-Done $sid
-        Set-SessionBusy $sid
+        Set-SessionBusy $sid $transcript
         Save-SessionWindow $sid $logTag
         return $null
     }

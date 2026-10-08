@@ -211,3 +211,34 @@ Describe 'busy sessions and all done' {
         Complete-SessionBusy 'c' | Should -BeFalse
     }
 }
+
+Describe 'busy sessions whose turn was interrupted' {
+    BeforeEach { Remove-Item -LiteralPath $Busy, $RoundPath -Recurse -Force -ErrorAction SilentlyContinue }
+    # Esc fires no Stop: the process lives on, but the transcript stops growing
+    It 'does not count a session whose transcript has been quiet for 20 minutes' {
+        $quiet = Join-Path $TestDrive 'quiet.jsonl'
+        [IO.File]::WriteAllText($quiet, '{}')
+        (Get-Item -LiteralPath $quiet).LastWriteTime = (Get-Date).AddMinutes(-20)
+        Set-SessionBusy 'a'
+        Set-SessionBusy 'b' $quiet
+        Remove-Item -LiteralPath (Join-Path $Busy 'a.json'), (Join-Path $Busy 'b.json') -Force
+        Write-JsonAtomic (Join-Path $Busy 'a.json') @{ pid = $PID; since = Get-NowMs }
+        Write-JsonAtomic (Join-Path $Busy 'b.json') @{ pid = $PID; since = Get-NowMs; transcript = $quiet }
+        Complete-SessionBusy 'a' | Should -BeTrue
+        Join-Path $Busy 'b.json' | Should -Not -Exist
+    }
+    It 'counts a session whose transcript was written a minute ago' {
+        $live = Join-Path $TestDrive 'live.jsonl'
+        [IO.File]::WriteAllText($live, '{}')
+        Set-SessionBusy 'a'
+        Set-SessionBusy 'b' $live
+        Remove-Item -LiteralPath (Join-Path $Busy 'a.json'), (Join-Path $Busy 'b.json') -Force
+        Write-JsonAtomic (Join-Path $Busy 'a.json') @{ pid = $PID; since = Get-NowMs }
+        Write-JsonAtomic (Join-Path $Busy 'b.json') @{ pid = $PID; since = Get-NowMs; transcript = $live }
+        Complete-SessionBusy 'a' | Should -BeFalse
+    }
+    It 'records the transcript path in the busy file' {
+        Set-SessionBusy 'a' 'C:\x\t.jsonl'
+        ([IO.File]::ReadAllText((Join-Path $Busy 'a.json')) | ConvertFrom-Json).transcript | Should -BeExactly 'C:\x\t.jsonl'
+    }
+}
