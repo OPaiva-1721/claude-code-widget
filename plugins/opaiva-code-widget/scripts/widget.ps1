@@ -58,7 +58,7 @@ try {
             Remove-Item -Force -ErrorAction SilentlyContinue
     }
 
-    Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+    Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms, System.Drawing
 
     # Win32: bring VS Code to the front, keep the widget from ever becoming the active window
     # (NoActivate), and allow focus only while typing a free-text answer
@@ -79,6 +79,7 @@ namespace ClaudeWidget {
         [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
+        [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr h);
         [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
         [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int index, int value);
         const int GWL_EXSTYLE = -20;
@@ -88,6 +89,7 @@ namespace ClaudeWidget {
             int ex = GetWindowLong(h, GWL_EXSTYLE);
             SetWindowLong(h, GWL_EXSTYLE, on ? (ex | WS_EX_NOACTIVATE) : (ex & ~WS_EX_NOACTIVATE));
         }
+        public static void DestroyIconHandle(IntPtr h) { DestroyIcon(h); }
         public static IntPtr Foreground() { return GetForegroundWindow(); }
         public static bool Activate(IntPtr h) { return SetForegroundWindow(h); }
         // A session's remembered window (VS Code or terminal), if it still exists
@@ -777,6 +779,7 @@ namespace ClaudeWidget {
     }
 
     function Update-View {
+        if ($script:dnd) { return }
         $p = @(Get-Pending)
         if ($p.Count -gt 0) { Show-Request $p[0] $p.Count; return }
         $d = @(Get-Done)
@@ -855,18 +858,80 @@ namespace ClaudeWidget {
     $ui.BtnDismiss.Add_Click({ Close-DoneNotice })
     $ui.BtnGoVs.Add_Click({ Close-DoneNotice -GoToSession })
 
-    # Right-click > Close: hands pending requests back to VS Code and exits
-    $menu = New-Object System.Windows.Controls.ContextMenu
-    $closeItem = New-Object System.Windows.Controls.MenuItem
-    $closeItem.Header = $S.closeWidget
-    $closeItem.Add_Click({
+    # Hands pending requests back to VS Code and exits (right-click > Close, and the tray menu)
+    function Close-Widget {
         foreach ($r in @(Get-Pending)) {
             try { Write-JsonAtomic (Join-Path $Queue "res-$($r.id).json") @{ decision = 'vscode' } } catch {}
         }
         $win.Close()
-    })
+    }
+    $menu = New-Object System.Windows.Controls.ContextMenu
+    $closeItem = New-Object System.Windows.Controls.MenuItem
+    $closeItem.Header = $S.closeWidget
+    $closeItem.Add_Click({ Close-Widget })
     [void]$menu.Items.Add($closeItem)
     $ui.Card.ContextMenu = $menu
+
+    # --- Tray icon and "do not disturb" ---
+    # The mode is the file dnd.flag: hook.ps1 sends requests to VS Code while it exists, and here the
+    # window is hidden. Re-read on every tick, so removing the file by hand works too.
+    function New-DotIcon([string]$hex) {
+        $bmp = New-Object System.Drawing.Bitmap 32, 32
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.SmoothingMode = 'AntiAlias'
+        $g.Clear([System.Drawing.Color]::Transparent)
+        $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.ColorTranslator]::FromHtml($hex))
+        $g.FillEllipse($brush, 4, 4, 24, 24)
+        $g.Dispose()
+        $brush.Dispose()
+        $h = $bmp.GetHicon()
+        $icon = [System.Drawing.Icon]::FromHandle($h).Clone()
+        [ClaudeWidget.WinFocus]::DestroyIconHandle($h)
+        $bmp.Dispose()
+        return $icon
+    }
+    $script:dnd = $false
+    $tray = $null
+    if (-not $RenderMode) {
+        $iconOn = New-DotIcon '#D97757'
+        $iconOff = New-DotIcon '#8A8A93'
+        $tray = New-Object System.Windows.Forms.NotifyIcon
+        $trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
+        $dndItem = $trayMenu.Items.Add($S.trayDnd)
+        $trayClose = $trayMenu.Items.Add($S.closeWidget)
+        $tray.ContextMenuStrip = $trayMenu
+        $tray.Icon = $iconOn
+        $tray.Text = $S.trayTip
+        function Sync-Dnd {
+            $on = Test-Dnd $Data
+            if ($on -eq $script:dnd) { return }
+            $script:dnd = $on
+            $tray.Icon = if ($on) { $iconOff } else { $iconOn }
+            $tray.Text = if ($on) { $S.trayTipDnd } else { $S.trayTip }
+            $dndItem.Checked = $on
+            if ($on) {
+                # Whatever is on screen goes back to VS Code
+                foreach ($r in @(Get-Pending)) {
+                    try { Write-JsonAtomic (Join-Path $Queue "res-$($r.id).json") @{ decision = 'vscode' } } catch {}
+                }
+                $script:current = $null
+                $win.Hide()
+            }
+            else { $win.Show() }
+        }
+        $toggleDnd = { Set-Dnd $Data (-not (Test-Dnd $Data)); Sync-Dnd }
+        $tray.Add_MouseClick({ param($s, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $toggleDnd } })
+        $dndItem.Add_Click({ & $toggleDnd })
+        $trayClose.Add_Click({ Close-Widget })
+        $tray.Visible = $true
+        # Hiding inside Loaded is undone when WPF finishes showing the window: hide a moment later
+        $win.Add_Loaded({
+            $once = New-Object System.Windows.Threading.DispatcherTimer
+            $once.Interval = [TimeSpan]::FromMilliseconds(30)
+            $once.Add_Tick({ param($sender, $e) $sender.Stop(); try { Sync-Dnd } catch { Write-Log $_ } })
+            $once.Start()
+        })
+    }
 
     # Pulsing dot while a request or question is waiting
     foreach ($dot in $ui.ReqDot, $ui.QDot) {
@@ -939,6 +1004,7 @@ namespace ClaudeWidget {
     $timer.Interval = [TimeSpan]::FromMilliseconds(400)
     $script:ticks = 0
     $timer.Add_Tick({
+        try { if ($tray) { Sync-Dnd } } catch { Write-Log $_ }
         try { Update-View } catch { Write-Log $_ }
         # Every ~2 s: a monitor unplugged or back, a resolution change, the taskbar moved
         $script:ticks++
@@ -952,7 +1018,10 @@ namespace ClaudeWidget {
             } catch { Write-Log $_ }
         }
     })
-    $win.Add_Closed({ $timer.Stop() })
+    $win.Add_Closed({
+        $timer.Stop()
+        if ($tray) { $tray.Visible = $false; $tray.Dispose() }
+    })
     $timer.Start()
 
     # Application.Run (not ShowDialog) honors ShowActivated=False: no focus stealing on start
@@ -964,6 +1033,7 @@ catch {
     Write-Log $_
 }
 finally {
+    if ($tray) { try { $tray.Visible = $false; $tray.Dispose() } catch {} }
     if ($mutex) {
         try { $mutex.ReleaseMutex() } catch {}
         $mutex.Dispose()
