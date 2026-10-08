@@ -206,6 +206,42 @@ function Test-UserWatching([string]$cwd, $sessionWindow) {
     } catch { return $false }
 }
 
+# The session's title as Claude Code shows it: the name given with /rename (custom-title), else the
+# automatic one (ai-title). Both are repeated in the transcript every few turns, so the last 512 KB
+# are enough. Empty when there is none or the transcript cannot be read.
+function Get-SessionTitle([string]$TranscriptPath, [string]$SessionId) {
+    if (-not $TranscriptPath) { return '' }
+    try {
+        $fs = [IO.File]::Open($TranscriptPath, 'Open', 'Read', 'ReadWrite')
+        try {
+            $start = [math]::Max([int64]0, $fs.Length - [int64]512KB)
+            [void]$fs.Seek($start, 'Begin')
+            $buf = New-Object byte[] ([int]($fs.Length - $start))
+            $n = 0
+            while ($n -lt $buf.Length) {
+                $read = $fs.Read($buf, $n, $buf.Length - $n)
+                if ($read -le 0) { break }
+                $n += $read
+            }
+        }
+        finally { $fs.Dispose() }
+        $lines = [Text.Encoding]::UTF8.GetString($buf, 0, $n) -split "`n"
+        # Reading from the middle of the file: the first line is cut
+        if ($start -gt 0) { $lines = @($lines | Select-Object -Skip 1) }
+        $custom = ''
+        $auto = ''
+        foreach ($line in $lines) {
+            if ($line.IndexOf('"custom-title"') -lt 0 -and $line.IndexOf('"ai-title"') -lt 0) { continue }
+            try { $o = $line | ConvertFrom-Json } catch { continue }
+            if ($o.sessionId -and $SessionId -and [string]$o.sessionId -ne $SessionId) { continue }
+            if ($o.type -eq 'custom-title' -and $o.customTitle) { $custom = [string]$o.customTitle }
+            elseif ($o.type -eq 'ai-title' -and $o.aiTitle) { $auto = [string]$o.aiTitle }
+        }
+        if ($custom) { return $custom.Trim() }
+        return $auto.Trim()
+    } catch { return '' }
+}
+
 # Text of Claude's last reply: the event field when present, otherwise the end of the transcript
 function Get-LastAssistantText($evt) {
     if ($evt.last_assistant_message) { return [string]$evt.last_assistant_message }
@@ -320,6 +356,7 @@ function Invoke-Hook($evt) {
     $tool = [string]$evt.tool_name
     $in = $evt.tool_input
     $cwd = [string]$evt.cwd
+    $transcript = [string]$evt.transcript_path
 
     if ($hookEvent -eq 'SessionStart') { Write-HookLog $logTag; [void](Start-Widget); return $null }
 
@@ -344,6 +381,7 @@ function Invoke-Hook($evt) {
             created = $now
             cwd     = $cwd
             message = $msg
+            title   = Get-SessionTitle $transcript $sid
             # Lets the widget's button go back to that exact window (VS Code or terminal)
             hwnd    = $(if ($sessionWindow) { [int64]$sessionWindow.hwnd } else { 0 })
             kind    = $(if ($sessionWindow) { [string]$sessionWindow.kind } else { '' })
@@ -366,6 +404,7 @@ function Invoke-Hook($evt) {
             tool        = $tool
             description = [string]$questions[0].question
             questions   = $questions
+            title       = Get-SessionTitle $transcript $sid
         }
         try { $res = Wait-Response $id } finally { Remove-Request $id }
 
@@ -397,6 +436,7 @@ function Invoke-Hook($evt) {
             tool        = $tool
             description = $desc
             detail      = $detail
+            title       = Get-SessionTitle $transcript $sid
         }
         try { $res = Wait-Response $id } finally { Remove-Request $id }
 

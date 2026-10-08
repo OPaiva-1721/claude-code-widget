@@ -124,3 +124,29 @@ Describe 'Get-WindowKind' {
         Get-WindowKind $process | Should -BeExactly $kind
     }
 }
+
+Describe 'Get-SessionTitle' {
+    BeforeAll { $titles = Join-Path $fixtures 'titles.jsonl' }
+    It 'prefers the name given with /rename over the automatic title' {
+        Get-SessionTitle $titles 's-1' | Should -BeExactly 'Named with rename'
+    }
+    It 'uses the latest automatic title when there is no /rename' {
+        Get-SessionTitle $titles 's-3' | Should -BeExactly 'Only automatic'
+    }
+    It 'ignores titles of other sessions' {
+        Get-SessionTitle $titles 's-9' | Should -BeExactly ''
+    }
+    It 'is empty without a transcript' {
+        Get-SessionTitle '' 's-1' | Should -BeExactly ''
+        Get-SessionTitle (Join-Path $TestDrive 'missing.jsonl') 's-1' | Should -BeExactly ''
+    }
+    It 'only reads the last 512 KB' {
+        $path = Join-Path $TestDrive 'long.jsonl'
+        $filler = '{"type":"user","message":"' + ('x' * 1000) + '"}'
+        $lines = @('{"type":"ai-title","aiTitle":"Too far back","sessionId":"s-1"}') + @($filler) * 600
+        [IO.File]::WriteAllLines($path, [string[]]$lines)
+        Get-SessionTitle $path 's-1' | Should -BeExactly ''
+        [IO.File]::AppendAllText($path, '{"type":"ai-title","aiTitle":"Near the end","sessionId":"s-1"}' + "`n")
+        Get-SessionTitle $path 's-1' | Should -BeExactly 'Near the end'
+    }
+}

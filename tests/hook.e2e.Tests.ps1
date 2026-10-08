@@ -125,6 +125,22 @@ Describe 'hook.ps1 end to end' {
             $r2.Stdout | Should -BeNullOrEmpty
             (Get-QueueFiles $box "done-$sid-*.json").Count | Should -Be 0
         }
+        It 'Stop and PermissionRequest carry the session title' {
+            $transcript = Join-Path $box.Data 'transcript.jsonl'
+            $stop = New-HookEvent 'Stop' $box.Data @{ last_assistant_message = 'ok'; transcript_path = $transcript }
+            [IO.File]::WriteAllText($transcript, ('{"type":"ai-title","aiTitle":"Fix the login","sessionId":"' + $stop.session_id + '"}' + "`n"))
+            [void](Complete-Hook (Start-Hook $box $stop))
+            $notice = (Get-QueueFiles $box "done-$($stop.session_id)-*.json")[0]
+            ([IO.File]::ReadAllText($notice.FullName, [Text.Encoding]::UTF8) | ConvertFrom-Json).title | Should -BeExactly 'Fix the login'
+
+            $perm = New-HookEvent 'PermissionRequest' $box.Data @{ tool_name = 'Bash'; tool_input = @{ command = 'ls' }; transcript_path = $transcript }
+            $perm.session_id = $stop.session_id
+            $run = Start-Hook $box $perm
+            $req = Wait-HookRequest $box
+            $req.title | Should -BeExactly 'Fix the login'
+            Send-WidgetResponse $box $req.id @{ decision = 'vscode' }
+            [void](Complete-Hook $run)
+        }
     }
 
     # After a plugin update the old widget keeps running from the old folder; the hook finds it through
