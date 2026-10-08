@@ -132,18 +132,46 @@ namespace ClaudeWidget {
         $script:canFocus = $true
     } catch { Write-Log $_ }
 
-    # "Finished" sound (different from the request sound)
-    $script:doneSound = $null
-    $wav = Join-Path $env:WINDIR 'Media\Windows Notify System Generic.wav'
-    if (Test-Path -LiteralPath $wav) {
-        try { $script:doneSound = New-Object System.Media.SoundPlayer $wav; $script:doneSound.Load() } catch { $script:doneSound = $null }
+    # Sounds go through Play-Sound so that the volume setting applies. The WPF MediaPlayer has a Volume;
+    # the classic Windows sound APIs do not, so they are only the fallback (the volume is ignored there,
+    # but 0 still means silence).
+    function Get-SchemeSound([string]$event) {
+        try {
+            $key = Get-Item -LiteralPath "HKCU:\AppEvents\Schemes\Apps\.Default\$event\.Current" -ErrorAction Stop
+            $path = [Environment]::ExpandEnvironmentVariables([string]$key.GetValue(''))
+            if ($path -and (Test-Path -LiteralPath $path)) { return $path }
+        } catch {}
+        return $null
     }
-
-    # "All done" sound: the last session of a round with several sessions finished
-    $script:allDoneSound = $null
-    $tada = Join-Path $env:WINDIR 'Media\tada.wav'
-    if (Test-Path -LiteralPath $tada) {
-        try { $script:allDoneSound = New-Object System.Media.SoundPlayer $tada; $script:allDoneSound.Load() } catch { $script:allDoneSound = $null }
+    $script:sounds = @{}
+    function New-MediaSound([string]$file) {
+        if (-not $file -or -not (Test-Path -LiteralPath $file)) { return $null }
+        try {
+            $p = New-Object System.Windows.Media.MediaPlayer
+            # A file Windows cannot decode: forget it, so that the next play uses the system sound
+            $p.Add_MediaFailed({ param($src, $e) foreach ($k in @($script:sounds.Keys)) { if ([object]::ReferenceEquals($script:sounds[$k], $src)) { $script:sounds[$k] = $null } } })
+            $p.Open([Uri]$file)
+            return $p
+        } catch { Write-Log $_; return $null }
+    }
+    if (-not $RenderMode) {
+        $script:sounds.request = New-MediaSound (Get-SchemeSound 'SystemAsterisk')
+        $script:sounds.done = New-MediaSound (Join-Path $env:WINDIR 'Media\Windows Notify System Generic.wav')
+        $script:sounds.allDone = New-MediaSound (Join-Path $env:WINDIR 'Media\tada.wav')
+    }
+    function Play-Sound([string]$name, [scriptblock]$fallback) {
+        $vol = [int]$script:prefs.volume
+        if ($vol -le 0) { return }
+        $p = $script:sounds[$name]
+        if ($p) {
+            try {
+                $p.Volume = $vol / 100.0
+                $p.Position = [TimeSpan]::Zero
+                $p.Play()
+                return
+            } catch { Write-Log $_ }
+        }
+        & $fallback
     }
 
     [xml]$xaml = @'
@@ -626,7 +654,7 @@ namespace ClaudeWidget {
         try { Set-ChangeView $r.change } catch { Write-Log $_; $ui.ChangeBox.Visibility = 'Collapsed' }
         try { Set-AlwaysButtons $r } catch { Write-Log $_; $ui.AlwaysList.Children.Clear(); $ui.AlwaysList.Visibility = 'Collapsed' }
         Set-Panel 'ReqPanel'
-        Invoke-Attention $r.id { [System.Media.SystemSounds]::Asterisk.Play() }
+        Invoke-Attention $r.id { Play-Sound 'request' { [System.Media.SystemSounds]::Asterisk.Play() } }
     }
 
     # ---------------- Question (AskUserQuestion) ----------------
@@ -775,7 +803,7 @@ namespace ClaudeWidget {
         }
         Update-QVisuals
         Set-Panel 'QPanel'
-        Invoke-Attention $r.id { [System.Media.SystemSounds]::Asterisk.Play() }
+        Invoke-Attention $r.id { Play-Sound 'request' { [System.Media.SystemSounds]::Asterisk.Play() } }
     }
 
     function Select-Option([hashtable]$tag) {
@@ -957,11 +985,8 @@ namespace ClaudeWidget {
             Set-Panel 'DonePanel'
             $allDone = [bool]$d.allDone
             Invoke-Attention $d.key {
-                if ($allDone) {
-                    if ($script:allDoneSound) { $script:allDoneSound.Play() } else { [System.Media.SystemSounds]::Exclamation.Play() }
-                }
-                elseif ($script:doneSound) { $script:doneSound.Play() }
-                else { [System.Media.SystemSounds]::Beep.Play() }
+                if ($allDone) { Play-Sound 'allDone' { [System.Media.SystemSounds]::Exclamation.Play() } }
+                else { Play-Sound 'done' { [System.Media.SystemSounds]::Beep.Play() } }
             }
         }
         if ($total -gt 1) {
